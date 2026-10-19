@@ -1,0 +1,7 @@
+.loom/
+node_modules/
+dist/
+.next/
+.env*
+out/
+cache/
