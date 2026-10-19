@@ -1,136 +1,133 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-// Minimal test framework without requiring external git submodules
-contract LeashPaymentTest {
-    // Events to listen to
-    event PolicyRegistered(bytes32 indexed policyCommitment, address indexed owner);
-    event PaymentReleased(
-        bytes32 indexed policyCommitment,
-        uint256 amount,
-        bytes32 indexed merchantIdHash,
-        bytes32 indexed nonce,
-        address recipient
-    );
-}
-
 import "../src/LeashPayment.sol";
+import "../src/LeashVerifier.sol";
 
-contract MockHonkVerifier is IVerifier {
-    bool public shouldPass = true;
-    bytes32[] public lastPublicInputs;
-    bytes public lastProof;
-
-    function setShouldPass(bool _pass) external {
-        shouldPass = _pass;
-    }
-
-    function verify(bytes calldata _proof, bytes32[] calldata _publicInputs) external view override returns (bool) {
-        return shouldPass;
-    }
+interface Vm {
+    function readFileBinary(string calldata path) external view returns (bytes memory);
 }
 
-contract TestRunner {
-    LeashPayment public payment;
-    MockHonkVerifier public verifier;
-    address payable public merchant = payable(address(0x1234567890123456789012345678901234567890));
+// Every test runs against the bb-generated HonkVerifier with a real proof from circuits/.
+// Regenerate the fixture with scripts/gen-proof-fixture.sh (see test/fixtures/README.md).
+contract LeashPaymentTest {
+    Vm constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
 
-    bytes32 constant POLICY_COMMITMENT = 0x09133620fa909d1ae63144fe7b802a6746fe87be8b3ed165aed34d165383acff;
-    bytes32 constant MERCHANT_HASH = 0x2251558a6d5a9c78d6af29ca25291e11cccb168a48b48c1daa9650055f9b06ec;
-    bytes32 constant NONCE_1 = bytes32(uint256(1));
-    bytes32 constant NONCE_2 = bytes32(uint256(2));
-    uint256 constant AMOUNT = 300;
+    LeashPayment payment;
+    address payable constant ATTACKER = payable(0x000000000000000000000000000000000000dEaD);
+
+    // Public inputs, read from the fixture so the tests can't drift from the proof.
+    bytes32 policyCommitment;
+    uint256 amount;
+    bytes32 merchantHash;
+    bytes32 nonce;
+    address payable merchant;
 
     function setUp() public {
-        verifier = new MockHonkVerifier();
-        payment = new LeashPayment(address(verifier));
+        payment = new LeashPayment(address(new HonkVerifier()));
+        uint256 recipient;
+        (policyCommitment, amount, merchantHash, nonce, recipient) = abi.decode(
+            vm.readFileBinary("test/fixtures/public_inputs"),
+            (bytes32, uint256, bytes32, bytes32, uint256)
+        );
+        merchant = payable(address(uint160(recipient)));
+    }
+
+    function _proof() internal view returns (bytes memory) {
+        return vm.readFileBinary("test/fixtures/proof");
+    }
+
+    function _pay(uint256 value, uint256 amt, bytes32 n, address payable to, bytes memory proof) internal {
+        payment.executePayment{value: value}(policyCommitment, amt, merchantHash, n, to, proof);
+    }
+
+    // Asserts the call reverts (with `expected` when non-empty) and consumes no nonce.
+    function _expectRevert(uint256 value, uint256 amt, bytes32 n, address payable to, bytes memory proof, string memory expected)
+        internal
+    {
+        try payment.executePayment{value: value}(policyCommitment, amt, merchantHash, n, to, proof) {
+            revert("expected revert");
+        } catch Error(string memory reason) {
+            if (bytes(expected).length != 0) {
+                require(keccak256(bytes(reason)) == keccak256(bytes(expected)), reason);
+            }
+        } catch (bytes memory) {
+            // HonkVerifier rejects bad proofs with custom errors.
+            require(bytes(expected).length == 0, "expected a string revert");
+        }
+        require(!payment.usedNonces(n), "nonce consumed on failure");
     }
 
     function test_policy_registration() public {
-        setUp();
-        payment.registerPolicy(POLICY_COMMITMENT);
-        require(payment.registeredPolicies(POLICY_COMMITMENT) == true, "Policy should be registered");
+        payment.registerPolicy(policyCommitment);
+        require(payment.registeredPolicies(policyCommitment), "policy not registered");
     }
 
     function test_unregistered_policy_fails() public {
-        setUp();
-        bytes memory fakeProof = hex"deadbeef";
-        bytes32 fakeCommitment = 0x1111111111111111111111111111111111111111111111111111111111111111;
-
-        try payment.executePayment(fakeCommitment, AMOUNT, MERCHANT_HASH, NONCE_1, merchant, fakeProof) {
-            revert("Expected revert on unregistered policy");
-        } catch Error(string memory reason) {
-            require(
-                keccak256(bytes(reason)) == keccak256(bytes("Policy not registered")),
-                "Unexpected revert reason"
-            );
-        }
+        _expectRevert(amount, amount, nonce, merchant, _proof(), "Policy not registered");
     }
 
-    function test_valid_payment_execution() public {
-        setUp();
-        payment.registerPolicy(POLICY_COMMITMENT);
-        bytes memory proof = hex"1234";
-
+    function test_real_proof_pays_proven_recipient() public {
+        payment.registerPolicy(policyCommitment);
         uint256 before = merchant.balance;
-        payment.executePayment{value: AMOUNT}(POLICY_COMMITMENT, AMOUNT, MERCHANT_HASH, NONCE_1, merchant, proof);
-        require(payment.usedNonces(NONCE_1) == true, "Nonce should be marked used");
-        require(merchant.balance == before + AMOUNT, "Merchant should receive exactly the proven amount");
+        _pay(amount, amount, nonce, merchant, _proof());
+        require(merchant.balance == before + amount, "merchant not paid the proven amount");
+        require(payment.usedNonces(nonce), "nonce not consumed");
     }
 
-    function test_nonce_replay_rejected() public {
-        setUp();
-        payment.registerPolicy(POLICY_COMMITMENT);
-        bytes memory proof = hex"1234";
+    function test_real_proof_pays_from_contract_balance() public {
+        payment.registerPolicy(policyCommitment);
+        (bool ok, ) = address(payment).call{value: amount}("");
+        require(ok, "funding failed");
+        uint256 before = merchant.balance;
+        _pay(0, amount, nonce, merchant, _proof());
+        require(merchant.balance == before + amount, "merchant not paid");
+        require(address(payment).balance == 0, "contract balance not spent");
+    }
 
-        payment.executePayment{value: AMOUNT}(POLICY_COMMITMENT, AMOUNT, MERCHANT_HASH, NONCE_1, merchant, proof);
-
-        // Try second payment with same nonce
-        try payment.executePayment{value: AMOUNT}(POLICY_COMMITMENT, AMOUNT, MERCHANT_HASH, NONCE_1, merchant, proof) {
-            revert("Expected revert on duplicate nonce");
+    function test_replay_rejected() public {
+        payment.registerPolicy(policyCommitment);
+        bytes memory proof = _proof();
+        _pay(amount, amount, nonce, merchant, proof);
+        try payment.executePayment{value: amount}(policyCommitment, amount, merchantHash, nonce, merchant, proof) {
+            revert("replay must fail");
         } catch Error(string memory reason) {
-            require(
-                keccak256(bytes(reason)) == keccak256(bytes("Nonce already used")),
-                "Unexpected revert reason"
-            );
+            require(keccak256(bytes(reason)) == keccak256("Nonce already used"), reason);
         }
     }
 
-    function test_invalid_proof_rejected() public {
-        setUp();
-        payment.registerPolicy(POLICY_COMMITMENT);
-        verifier.setShouldPass(false);
-        bytes memory badProof = hex"ffff";
-
-        try payment.executePayment(POLICY_COMMITMENT, AMOUNT, MERCHANT_HASH, NONCE_2, merchant, badProof) {
-            revert("Expected revert on invalid ZK proof");
-        } catch Error(string memory reason) {
-            require(
-                keccak256(bytes(reason)) == keccak256(bytes("Invalid ZK proof")),
-                "Unexpected revert reason"
-            );
-        }
+    function test_swapped_recipient_rejected() public {
+        payment.registerPolicy(policyCommitment);
+        uint256 before = ATTACKER.balance;
+        _expectRevert(amount, amount, nonce, ATTACKER, _proof(), "");
+        require(ATTACKER.balance == before, "attacker received funds");
     }
 
-    function _expectRevert(bytes32 nonce, uint256 value, string memory expected) internal {
-        try payment.executePayment{value: value}(POLICY_COMMITMENT, AMOUNT, MERCHANT_HASH, nonce, merchant, hex"1234") {
-            revert("Expected revert");
-        } catch Error(string memory reason) {
-            require(keccak256(bytes(reason)) == keccak256(bytes(expected)), reason);
-        }
-        require(!payment.usedNonces(nonce), "Nonce must not be consumed on failure");
+    function test_swapped_nonce_rejected() public {
+        payment.registerPolicy(policyCommitment);
+        _expectRevert(amount, amount, bytes32(uint256(nonce) + 1), merchant, _proof(), "");
+    }
+
+    function test_inflated_amount_rejected() public {
+        payment.registerPolicy(policyCommitment);
+        _expectRevert(amount + 1, amount + 1, nonce, merchant, _proof(), "");
+    }
+
+    function test_tampered_proof_rejected() public {
+        payment.registerPolicy(policyCommitment);
+        bytes memory proof = _proof();
+        proof[proof.length / 2] ^= 0x01;
+        _expectRevert(amount, amount, nonce, merchant, proof, "");
     }
 
     function test_unfunded_payment_reverts_instead_of_fake_success() public {
-        setUp();
-        payment.registerPolicy(POLICY_COMMITMENT);
-        _expectRevert(bytes32(uint256(9)), 0, "Insufficient contract balance");
+        payment.registerPolicy(policyCommitment);
+        _expectRevert(0, amount, nonce, merchant, _proof(), "Insufficient contract balance");
     }
 
     function test_value_mismatch_reverts() public {
-        setUp();
-        payment.registerPolicy(POLICY_COMMITMENT);
-        _expectRevert(bytes32(uint256(10)), AMOUNT - 1, "msg.value must equal proven amount");
+        payment.registerPolicy(policyCommitment);
+        _expectRevert(amount - 1, amount, nonce, merchant, _proof(), "msg.value must equal proven amount");
     }
 
     receive() external payable {}

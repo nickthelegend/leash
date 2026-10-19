@@ -1,0 +1,17 @@
+# Inputs for the contracts/test/fixtures proof. Regenerate with scripts/gen-proof-fixture.sh.
+# Policy: merchant 42 in a depth-4 allowlist (siblings 101/202/303/404, all left), cap 500, salt 987654321.
+
+# Public
+policy_commitment = "0x09133620fa909d1ae63144fe7b802a6746fe87be8b3ed165aed34d165383acff"
+amount = "300"
+merchant_id_hash = "0x2251558a6d5a9c78d6af29ca25291e11cccb168a48b48c1daa9650055f9b06ec"
+nonce = "1"
+recipient = "0x1234567890123456789012345678901234567890"
+
+# Private
+max_per_tx = "500"
+merkle_root = "0x1404f0cfc68f868446e09d04d59efd9df55f6c553f96a834ca64726f645c9041"
+policy_salt = "987654321"
+merchant_id = "42"
+merkle_path_indices = [false, false, false, false]
+merkle_path_elements = ["101", "202", "303", "404"]

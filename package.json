@@ -8,6 +8,7 @@
     "test": "pnpm --filter '@leash/*' test && cd circuits && nargo test && cd ../contracts && forge test",
     "test:circuits": "cd circuits && nargo test",
     "test:contracts": "cd contracts && forge test",
+    "gen:fixture": "./scripts/gen-proof-fixture.sh",
     "dev:gateway": "pnpm --filter @leash/core dev",
     "dev:web": "pnpm --filter web dev",
     "start": "pnpm --filter @leash/core start"
