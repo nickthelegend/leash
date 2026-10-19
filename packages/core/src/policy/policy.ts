@@ -114,25 +114,30 @@ export function getMerchantProof(
   return getMerklePath(found.leafIndex, leaves, policy.bundle);
 }
 
+let cachedDefaultPolicy: SpendingPolicy | null = null;
+
 /**
  * Standard preset policy for the judge demo.
  * Merchants: OpenAI, Anthropic, GitHub, AWS, DigitalOcean, PayPal, Vercel, Supabase
  * Cap: $5.00 (500 cents)
  */
 export function getDefaultPolicy(): SpendingPolicy {
-  return createSpendingPolicy(
-    'AI Agent Production Leash',
-    500, // $5.00
-    [
-      'openai',
-      'anthropic',
-      'github',
-      'aws',
-      'digitalocean',
-      'paypal',
-      'vercel',
-      'supabase',
-    ],
-    '987654321'
-  );
+  if (!cachedDefaultPolicy) {
+    cachedDefaultPolicy = createSpendingPolicy(
+      'AI Agent Production Leash',
+      500, // $5.00
+      [
+        'openai',
+        'anthropic',
+        'github',
+        'aws',
+        'digitalocean',
+        'paypal',
+        'vercel',
+        'supabase',
+      ],
+      '987654321'
+    );
+  }
+  return cachedDefaultPolicy;
 }

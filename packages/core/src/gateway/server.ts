@@ -11,6 +11,7 @@ import {
 } from '../policy/policy.js';
 import { generatePaymentProof } from '../prover/prover.js';
 import { verifyPaymentProof } from '../verifier/verifier.js';
+import { createVerifierRouter } from '../verifier/service.js';
 import { nonceStore } from './nonceStore.js';
 
 // Load .env.local if present, else .env
@@ -23,14 +24,21 @@ const PORT = process.env.GATEWAY_PORT || process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
+// Mount the real Noir verifier service router (POST /verify, POST /api/verify, GET /health)
+app.use(createVerifierRouter());
+
 // In-memory store of registered policy commitments & policies
 const activePolicies: Map<string, SpendingPolicy> = new Map();
 const registeredCommitments: Set<string> = new Set();
 
-// Register the default demonstration policy on boot
-const defaultPolicy = getDefaultPolicy();
-activePolicies.set(defaultPolicy.policyCommitment, defaultPolicy);
-registeredCommitments.add(defaultPolicy.policyCommitment);
+export function ensureDefaultPolicyRegistered(): SpendingPolicy {
+  const defaultPolicy = getDefaultPolicy();
+  if (!activePolicies.has(defaultPolicy.policyCommitment)) {
+    activePolicies.set(defaultPolicy.policyCommitment, defaultPolicy);
+    registeredCommitments.add(defaultPolicy.policyCommitment);
+  }
+  return defaultPolicy;
+}
 
 /**
  * Health & status check
@@ -121,7 +129,7 @@ app.post('/api/prove', (req: Request, res: Response) => {
 
     const policy =
       activePolicies.get(policyCommitment) ||
-      (policyCommitment ? undefined : defaultPolicy);
+      (policyCommitment ? undefined : ensureDefaultPolicyRegistered());
 
     if (!policy) {
       return res.status(404).json({
@@ -316,7 +324,7 @@ app.get('/api/logs', (_req: Request, res: Response) => {
  */
 app.get('/api/harness/run', async (_req: Request, res: Response) => {
   try {
-    const summary = await runInjectionHarness(defaultPolicy);
+    const summary = await runInjectionHarness(ensureDefaultPolicyRegistered());
     res.json({
       success: true,
       summary,
@@ -330,6 +338,7 @@ app.get('/api/harness/run', async (_req: Request, res: Response) => {
 });
 
 export function startGatewayServer(port: number = Number(PORT)) {
+  ensureDefaultPolicyRegistered();
   return app.listen(port, () => {
     console.log(`[LEASH Gateway] Running at http://localhost:${port}`);
     console.log(

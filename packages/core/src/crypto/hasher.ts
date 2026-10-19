@@ -64,6 +64,31 @@ function parsePolicyBundleOutput(output: string): PolicyBundle {
   };
 }
 
+export function resolvePolicyCircuitDir(): string {
+  if (process.env.LEASH_POLICY_CIRCUIT_DIR && fs.existsSync(process.env.LEASH_POLICY_CIRCUIT_DIR)) {
+    return path.resolve(process.env.LEASH_POLICY_CIRCUIT_DIR);
+  }
+
+  const candidates = [
+    path.resolve(__dirname, '../../policy_circuit'),
+    path.resolve(__dirname, '../../../policy_circuit'),
+    path.resolve(__dirname, '../../../packages/core/policy_circuit'),
+    path.resolve(__dirname, '../../../../packages/core/policy_circuit'),
+    path.resolve(process.cwd(), 'policy_circuit'),
+    path.resolve(process.cwd(), 'packages/core/policy_circuit'),
+    path.resolve(process.cwd(), '../core/policy_circuit'),
+    path.resolve(process.cwd(), '../../packages/core/policy_circuit'),
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate) && fs.existsSync(path.join(candidate, 'Nargo.toml'))) {
+      return candidate;
+    }
+  }
+
+  throw new Error(`Cannot locate policy_circuit directory. Looked in: ${candidates.join(', ')}`);
+}
+
 /**
  * Executes policy_circuit to compute the Pedersen Merkle tree and commitment with 100% Noir fidelity.
  */
@@ -76,7 +101,7 @@ export function computePolicyBundle(
     throw new Error(`Expected exactly 16 leaves, received ${leavesBigInt.length}`);
   }
 
-  const policyCircuitDir = path.resolve(__dirname, '../../policy_circuit');
+  const policyCircuitDir = resolvePolicyCircuitDir();
   const tempProverFile = path.resolve(
     policyCircuitDir,
     `Prover_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.toml`

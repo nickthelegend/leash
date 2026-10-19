@@ -2,6 +2,7 @@ import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { getMerchantProof, SpendingPolicy } from '../policy/policy.js';
+import { resolveCircuitsDir } from '../verifier/verifier.js';
 
 export interface PaymentProofRequest {
   policy: SpendingPolicy;
@@ -56,8 +57,7 @@ export function generatePaymentProof(
   }
 
   const merklePath = getMerchantProof(policy, merchantName);
-
-  const circuitsDir = path.resolve(__dirname, '../../../../circuits');
+  const circuitsDir = resolveCircuitsDir();
   const tempId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const tempProverFile = path.resolve(circuitsDir, `Prover_${tempId}.toml`);
   const witnessName = `witness_${tempId}`;

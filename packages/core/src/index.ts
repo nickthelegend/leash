@@ -5,4 +5,5 @@ export * from './harness/injectionSuite.js';
 export * from './paypal/paypal.js';
 export * from './policy/policy.js';
 export * from './prover/prover.js';
+export * from './verifier/service.js';
 export * from './verifier/verifier.js';

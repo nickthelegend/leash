@@ -7,6 +7,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx watch src/gateway/server.ts",
+    "verifier": "tsx src/verifier/service.ts",
     "start": "tsx src/gateway/server.ts",
     "test": "vitest run"
   },
