@@ -18,6 +18,7 @@ describe('LEASH Noir Verifier Service', () => {
     merchantName: 'openai',
     amountCents: 300,
     nonce: '42001',
+    recipient: '0x1234567890123456789012345678901234567890',
   });
 
   describe('Dependency & Key Assertions (Fail Loudly)', () => {

@@ -9,6 +9,8 @@ export interface PaymentProofRequest {
   merchantName: string;
   amountCents: number;
   nonce: string | number;
+  /** Payee address bound into the proof. Falls back to LEASH_RECIPIENT_ADDRESS. */
+  recipient?: string;
   useEvmTarget?: boolean;
 }
 
@@ -20,6 +22,7 @@ export interface PaymentProofResult {
     amount: string;
     merchant_id_hash: string;
     nonce: string;
+    recipient: string;
   };
   durationMs: number;
   circuitGates?: number;
@@ -36,6 +39,12 @@ export function generatePaymentProof(
 ): PaymentProofResult {
   const startTime = Date.now();
   const { policy, merchantName, amountCents, nonce, useEvmTarget } = req;
+  const recipient = (req.recipient ?? process.env.LEASH_RECIPIENT_ADDRESS ?? '').trim();
+  if (!/^0x[0-9a-fA-F]{40}$/.test(recipient)) {
+    throw new Error(
+      'Recipient not configured: pass a 0x-prefixed 20-byte recipient or set LEASH_RECIPIENT_ADDRESS.'
+    );
+  }
 
   // Pre-check 1: Merchant Allowlist
   const normalizedMerchant = merchantName.trim().toLowerCase();
@@ -69,6 +78,7 @@ export function generatePaymentProof(
       `amount = "${amountCents}"`,
       `merchant_id_hash = "${merklePath.merchantIdHash}"`,
       `nonce = "${nonce.toString()}"`,
+      `recipient = "${recipient}"`,
       '',
       `max_per_tx = "${policy.maxPerTxCents}"`,
       `merkle_root = "${policy.merkleRoot}"`,
@@ -128,6 +138,7 @@ export function generatePaymentProof(
         amount: amountCents.toString(),
         merchant_id_hash: merklePath.merchantIdHash,
         nonce: nonce.toString(),
+        recipient,
       },
       durationMs,
     };

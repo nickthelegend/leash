@@ -17,7 +17,7 @@ const INITIAL_AGENTS: AgentConfig[] = [
     role: 'Autonomous Inference & Prompt Processing',
     allowlistedMerchants: ['openai', 'anthropic', 'vercel'],
     capCents: 500, // $5.00
-    commitmentHash: '0x15c086a64383a3b30c046d3dcf063b01abdb316633ca0280f8e1f1bd3ec8cd6c',
+    commitmentHash: '',
   },
   {
     id: 'agent_2',
@@ -26,7 +26,7 @@ const INITIAL_AGENTS: AgentConfig[] = [
     role: 'Infrastructure Auto-Scaling & Build Pipelines',
     allowlistedMerchants: ['aws', 'github', 'digitalocean'],
     capCents: 1000, // $10.00
-    commitmentHash: '0x2b8e4f1a9c3d5e7b2a6f8c0e4d6a8b2c4e6f8a0b2c4d6e8f0a2b4c6d8e0f2a4b',
+    commitmentHash: '',
   },
   {
     id: 'agent_3',
@@ -35,7 +35,7 @@ const INITIAL_AGENTS: AgentConfig[] = [
     role: 'Database Ingestion & Cache Syncing',
     allowlistedMerchants: ['supabase', 'aws'],
     capCents: 300, // $3.00
-    commitmentHash: '0x3c9f2b4e6a8d0c2e4f6a8b0d2e4f6a8b0c2d4e6f8a0b2c4d6e8f0a2b4c6d8e0f',
+    commitmentHash: '',
   },
 ];
 
@@ -67,16 +67,49 @@ export default function Home() {
     fetchLogs();
   }, [fetchLogs]);
 
+  // Commit each agent's policy (cap + allowlist) server-side; the commitment is real Pedersen output.
+  const policiesRef = React.useRef<Record<string, unknown>>({});
+  const [policyError, setPolicyError] = useState<string | null>(null);
+  const commitPolicy = useCallback(async (agent: AgentConfig) => {
+    const res = await fetch('/api/policies', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: agent.name,
+        maxPerTxCents: agent.capCents,
+        merchants: agent.allowlistedMerchants,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.policy) {
+      throw new Error(data.error || `Policy commit failed (HTTP ${res.status})`);
+    }
+    policiesRef.current[agent.id] = data.policy;
+    setAgents((prev) =>
+      prev.map((a) =>
+        a.id === agent.id && a.capCents === data.policy.maxPerTxCents
+          ? { ...a, commitmentHash: data.policy.policyCommitment }
+          : a
+      )
+    );
+    return data.policy;
+  }, []);
+
+  useEffect(() => {
+    Promise.all(INITIAL_AGENTS.map(commitPolicy)).catch((e: Error) =>
+      setPolicyError(e.message)
+    );
+  }, [commitPolicy]);
+
   // Handle spending dial adjustments
   const handleCapChange = (agentId: string, newCapCents: number) => {
     setAgents((prev) =>
       prev.map((agent) => {
         if (agent.id === agentId) {
-          // Recompute a pseudo commitment preview for visual feedback
-          return {
-            ...agent,
-            capCents: newCapCents,
-          };
+          const next = { ...agent, capCents: newCapCents, commitmentHash: '' };
+          delete policiesRef.current[agentId];
+          commitPolicy(next).catch((e: Error) => setPolicyError(e.message));
+          return next;
         }
         return agent;
       })
@@ -96,15 +129,19 @@ export default function Home() {
     setZkStatus('proving');
     setZkProofData(null);
 
-    const nonce = String(nonceCounter);
+    const startedAt = Date.now();
+    const nonce = `${startedAt}${nonceCounter}`;
     setNonceCounter((prev) => prev + 1);
 
     try {
+      const policy =
+        policiesRef.current[targetAgent.id] ?? (await commitPolicy(targetAgent));
       // 1. Prover generates real UltraHonk proof
       const proveRes = await fetch('/api/prove', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          policy,
           merchantName,
           amountCents,
           nonce,
@@ -117,11 +154,7 @@ export default function Home() {
         // Circuit violation (e.g. over cap or unlisted merchant)
         setZkStatus('rejected');
         setZkProofData({
-          rejectionReason:
-            proveData.error ||
-            `Circuit assertion failed: Amount $${(amountCents / 100).toFixed(
-              2
-            )} exceeds active cap of $${(targetAgent.capCents / 100).toFixed(2)}`,
+          rejectionReason: proveData.error || `Prover failed (HTTP ${proveRes.status})`,
         });
 
         const newLog: AuditLogItem = {
@@ -129,12 +162,12 @@ export default function Home() {
           timestamp: new Date().toISOString(),
           policyCommitment: targetAgent.commitmentHash,
           amountCents,
-          merchantIdHash: '0x0000...blocked',
+          merchantIdHash: '',
           nonce,
           proofVerified: false,
           status: 'REJECTED',
           rejectionReason: proveData.error,
-          durationMs: 18,
+          durationMs: Date.now() - startedAt,
         };
         setLogs((prev) => [newLog, ...prev]);
         setIsLoading(false);
@@ -163,7 +196,7 @@ export default function Home() {
         setZkProofData({
           proofHex: proveData.proofHex,
           publicInputsHex: proveData.publicInputsHex,
-          durationMs: verifyData.durationMs || 12,
+          durationMs: verifyData.durationMs,
           extractedPublicInputs: verifyData.extractedPublicInputs,
           verifiedAt: new Date().toLocaleTimeString(),
         });
@@ -184,6 +217,9 @@ export default function Home() {
         });
 
         const payData = await payRes.json();
+        if (!payData.success) {
+          throw new Error(payData.error || `Payment release failed (HTTP ${payRes.status})`);
+        }
 
         const completedLog: AuditLogItem = {
           id: `log_${Date.now()}`,
@@ -195,15 +231,15 @@ export default function Home() {
           proofVerified: true,
           status: 'COMPLETED',
           paypalOrderId: payData.paypal?.orderId,
-          paypalStatus: payData.paypal?.status || 'COMPLETED',
-          durationMs: (proveData.durationMs || 290) + (verifyData.durationMs || 12),
+          paypalStatus: payData.paypal?.status,
+          durationMs: Date.now() - startedAt,
         };
         setLogs((prev) => [completedLog, ...prev]);
       } else {
         setZkStatus('rejected');
         setZkProofData({
           rejectionReason:
-            verifyData.error || 'Cryptographic verification failed in Barretenberg.',
+            verifyData.error || `Verifier rejected the proof (HTTP ${verifyRes.status})`,
         });
       }
     } catch (err: any) {
@@ -247,6 +283,12 @@ export default function Home() {
             Noir proof against a committed policy before PayPal releases funds.
           </p>
         </div>
+
+        {policyError && (
+          <div role="alert" className="rounded-xl border border-red-500/40 bg-red-950/40 px-4 py-3 text-sm text-red-200">
+            Policy commitment unavailable: {policyError}
+          </div>
+        )}
 
         {/* 10-Second Demo Moment Hero */}
         <section aria-label="10-Second Demo Moment">
@@ -294,7 +336,7 @@ export default function Home() {
               </p>
             </div>
             <span className="hidden sm:inline-flex text-xs font-mono text-emerald-400/90 bg-white/5 px-2.5 py-1 rounded-lg border border-white/10">
-              3 Agents Active
+              {agents.length} Agents Active
             </span>
           </div>
 

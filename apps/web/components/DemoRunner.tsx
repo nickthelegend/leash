@@ -37,12 +37,10 @@ export function DemoRunner({
     try {
       // Step 1: Run legitimate payment
       await onRunLegitDemo();
-      await new Promise((r) => setTimeout(r, 600));
 
       // Step 2: Run injection attack
       setStep('attack');
       await onRunAttackDemo();
-      await new Promise((r) => setTimeout(r, 400));
 
       setStep('complete');
     } finally {
