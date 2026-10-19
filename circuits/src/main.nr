@@ -26,6 +26,7 @@ fn main(
     amount: pub Field,
     merchant_id_hash: pub Field,
     nonce: pub Field,
+    recipient: pub Field,
 
     // Private inputs (known only to agent / policy holder)
     max_per_tx: Field,
@@ -61,10 +62,16 @@ fn main(
     let computed_root = compute_merkle_root(merchant_id, merkle_path_indices, merkle_path_elements);
     assert(computed_root == merkle_root, "Merchant not in allowlist Merkle tree");
 
-    // 5. Nonce binding:
-    // Ensure public nonce is bound to the circuit evaluation so proof cannot be replayed.
-    assert(nonce == nonce, "Nonce constraint failed");
+    // 5. Nonce and recipient binding:
+    // Both are public inputs, so the UltraHonk verifier binds the proof to their exact values:
+    // a proof for one nonce/recipient fails verification against any other. LeashPayment feeds
+    // the payee address into the recipient slot, so funds can only go to the proven recipient.
+    // Recipient must be a valid 160-bit EVM address (no aliasing via values >= 2^160).
+    recipient.assert_max_bit_size::<160>();
+    let _ = nonce;
 }
+
+global TEST_RECIPIENT: Field = 0x1234567890123456789012345678901234567890;
 
 #[test]
 fn test_valid_payment() {
@@ -90,6 +97,7 @@ fn test_valid_payment() {
         amount,
         merchant_id_hash,
         nonce,
+        TEST_RECIPIENT,
         max_per_tx,
         merkle_root,
         policy_salt,
@@ -118,6 +126,7 @@ fn test_exact_cap_payment() {
         amount,
         merchant_id_hash,
         nonce,
+        TEST_RECIPIENT,
         max_per_tx,
         merkle_root,
         policy_salt,
@@ -146,6 +155,7 @@ fn test_over_cap_fails() {
         amount,
         merchant_id_hash,
         nonce,
+        TEST_RECIPIENT,
         max_per_tx,
         merkle_root,
         policy_salt,
@@ -175,6 +185,7 @@ fn test_unauthorized_merchant_fails() {
         amount,
         merchant_id_hash,
         nonce,
+        TEST_RECIPIENT,
         max_per_tx,
         merkle_root,
         policy_salt,
@@ -203,6 +214,7 @@ fn test_invalid_commitment_fails() {
         amount,
         merchant_id_hash,
         nonce,
+        TEST_RECIPIENT,
         max_per_tx,
         merkle_root,
         policy_salt,
@@ -231,6 +243,7 @@ fn test_mismatched_merchant_hash_fails() {
         amount,
         fake_merchant_hash,
         nonce,
+        TEST_RECIPIENT,
         max_per_tx,
         merkle_root,
         policy_salt,
@@ -261,6 +274,38 @@ fn test_amount_above_u64_wraparound_fails() {
         amount,
         merchant_id_hash,
         nonce,
+        TEST_RECIPIENT,
+        max_per_tx,
+        merkle_root,
+        policy_salt,
+        merchant_id,
+        path_indices,
+        path_elements
+    );
+}
+
+// A recipient wider than 160 bits is not an EVM address and must be rejected.
+#[test(should_fail)]
+fn test_recipient_above_160_bits_fails() {
+    let max_per_tx: Field = 500;
+    let policy_salt: Field = 12345;
+    let merchant_id: Field = 42;
+    let path_elements = [10, 20, 30, 40];
+    let path_indices = [false, false, false, false];
+
+    let merkle_root = compute_merkle_root(merchant_id, path_indices, path_elements);
+    let policy_commitment = pedersen_hash([merkle_root, max_per_tx, policy_salt]);
+    let merchant_id_hash = pedersen_hash([merchant_id, 0]);
+    let amount: Field = 300;
+    let nonce: Field = 8;
+    let recipient: Field = 0x10000000000000000000000000000000000000000; // 2^160
+
+    main(
+        policy_commitment,
+        amount,
+        merchant_id_hash,
+        nonce,
+        recipient,
         max_per_tx,
         merkle_root,
         policy_salt,
