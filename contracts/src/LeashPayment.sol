@@ -77,14 +77,14 @@ contract LeashPayment {
 
         usedNonces[nonce] = true;
 
-        // Release payment to recipient
+        // Release exactly the proven amount. Never emit PaymentReleased without moving funds.
         if (msg.value > 0) {
-            (bool success, ) = recipient.call{value: msg.value}("");
-            require(success, "Payment transfer failed");
-        } else if (amount > 0 && address(this).balance >= amount) {
-            (bool success, ) = recipient.call{value: amount}("");
-            require(success, "Payment transfer failed");
+            require(msg.value == amount, "msg.value must equal proven amount");
+        } else {
+            require(address(this).balance >= amount, "Insufficient contract balance");
         }
+        (bool success, ) = recipient.call{value: amount}("");
+        require(success, "Payment transfer failed");
 
         emit PaymentReleased(policyCommitment, amount, merchantIdHash, nonce, recipient);
     }
