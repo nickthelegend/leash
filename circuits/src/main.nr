@@ -43,6 +43,10 @@ fn main(
 
     // 2. Spending Rule R2: Per-transaction cap check
     // Converts to u64 to enforce strict numeric upper bound without field overflow attacks.
+    // Range-check both values before casting: `as u64` alone truncates, so a Field like
+    // 2^64 + 100 would pass a 500 cap while the contract releases the full uint256 amount.
+    amount.assert_max_bit_size::<64>();
+    max_per_tx.assert_max_bit_size::<64>();
     let amount_u64 = amount as u64;
     let max_u64 = max_per_tx as u64;
     assert(amount_u64 <= max_u64, "Amount exceeds per-transaction cap");
@@ -226,6 +230,36 @@ fn test_mismatched_merchant_hash_fails() {
         policy_commitment,
         amount,
         fake_merchant_hash,
+        nonce,
+        max_per_tx,
+        merkle_root,
+        policy_salt,
+        merchant_id,
+        path_indices,
+        path_elements
+    );
+}
+
+// Field-overflow attack: 2^64 + 100 truncates to 100 under `as u64`, which would
+// slip under a 500 cap while the contract reads the full uint256 amount.
+#[test(should_fail)]
+fn test_amount_above_u64_wraparound_fails() {
+    let max_per_tx: Field = 500;
+    let policy_salt: Field = 12345;
+    let merchant_id: Field = 42;
+    let path_elements = [10, 20, 30, 40];
+    let path_indices = [false, false, false, false];
+
+    let merkle_root = compute_merkle_root(merchant_id, path_indices, path_elements);
+    let policy_commitment = pedersen_hash([merkle_root, max_per_tx, policy_salt]);
+    let merchant_id_hash = pedersen_hash([merchant_id, 0]);
+    let amount: Field = 18446744073709551716; // 2^64 + 100
+    let nonce: Field = 7;
+
+    main(
+        policy_commitment,
+        amount,
+        merchant_id_hash,
         nonce,
         max_per_tx,
         merkle_root,
