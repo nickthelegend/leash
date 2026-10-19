@@ -72,8 +72,10 @@ contract TestRunner {
         payment.registerPolicy(POLICY_COMMITMENT);
         bytes memory proof = hex"1234";
 
-        payment.executePayment(POLICY_COMMITMENT, AMOUNT, MERCHANT_HASH, NONCE_1, merchant, proof);
+        uint256 before = merchant.balance;
+        payment.executePayment{value: AMOUNT}(POLICY_COMMITMENT, AMOUNT, MERCHANT_HASH, NONCE_1, merchant, proof);
         require(payment.usedNonces(NONCE_1) == true, "Nonce should be marked used");
+        require(merchant.balance == before + AMOUNT, "Merchant should receive exactly the proven amount");
     }
 
     function test_nonce_replay_rejected() public {
@@ -81,10 +83,10 @@ contract TestRunner {
         payment.registerPolicy(POLICY_COMMITMENT);
         bytes memory proof = hex"1234";
 
-        payment.executePayment(POLICY_COMMITMENT, AMOUNT, MERCHANT_HASH, NONCE_1, merchant, proof);
+        payment.executePayment{value: AMOUNT}(POLICY_COMMITMENT, AMOUNT, MERCHANT_HASH, NONCE_1, merchant, proof);
 
         // Try second payment with same nonce
-        try payment.executePayment(POLICY_COMMITMENT, AMOUNT, MERCHANT_HASH, NONCE_1, merchant, proof) {
+        try payment.executePayment{value: AMOUNT}(POLICY_COMMITMENT, AMOUNT, MERCHANT_HASH, NONCE_1, merchant, proof) {
             revert("Expected revert on duplicate nonce");
         } catch Error(string memory reason) {
             require(
@@ -109,4 +111,27 @@ contract TestRunner {
             );
         }
     }
+
+    function _expectRevert(bytes32 nonce, uint256 value, string memory expected) internal {
+        try payment.executePayment{value: value}(POLICY_COMMITMENT, AMOUNT, MERCHANT_HASH, nonce, merchant, hex"1234") {
+            revert("Expected revert");
+        } catch Error(string memory reason) {
+            require(keccak256(bytes(reason)) == keccak256(bytes(expected)), reason);
+        }
+        require(!payment.usedNonces(nonce), "Nonce must not be consumed on failure");
+    }
+
+    function test_unfunded_payment_reverts_instead_of_fake_success() public {
+        setUp();
+        payment.registerPolicy(POLICY_COMMITMENT);
+        _expectRevert(bytes32(uint256(9)), 0, "Insufficient contract balance");
+    }
+
+    function test_value_mismatch_reverts() public {
+        setUp();
+        payment.registerPolicy(POLICY_COMMITMENT);
+        _expectRevert(bytes32(uint256(10)), AMOUNT - 1, "msg.value must equal proven amount");
+    }
+
+    receive() external payable {}
 }
