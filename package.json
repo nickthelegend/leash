@@ -1,0 +1,18 @@
+{
+  "name": "leash-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "LEASH: Zero-Knowledge Spending Policies for AI Agents (PayPal AI Hackathon)",
+  "scripts": {
+    "build": "pnpm --filter '@leash/*' --filter 'web' build",
+    "test": "pnpm --filter '@leash/*' test && cd circuits && nargo test && cd ../contracts && forge test",
+    "test:circuits": "cd circuits && nargo test",
+    "test:contracts": "cd contracts && forge test",
+    "dev:gateway": "pnpm --filter @leash/core dev",
+    "dev:web": "pnpm --filter web dev",
+    "start": "pnpm --filter @leash/core start"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  }
+}
