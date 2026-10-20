@@ -46,6 +46,8 @@ jobs:
           curl -fsSL "https://github.com/AztecProtocol/aztec-packages/releases/download/v${BB_VERSION}/barretenberg-amd64-linux.tar.gz" | tar xz -C .tools bb
           .tools/nargo --version
           .tools/bb --version
+      - name: Put the pinned nargo and bb on PATH
+        run: echo "$PWD/.tools" >> "$GITHUB_PATH"
       - run: pnpm install --frozen-lockfile
       - run: pnpm run pretest
       - run: pnpm test
