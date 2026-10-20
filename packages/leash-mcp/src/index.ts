@@ -16,6 +16,49 @@ import {
   getDefaultPolicy,
   verifyPaymentProof,
 } from '@leash/core';
+import { execFileSync } from 'node:child_process';
+
+/** Proofs made by leash_request_payment in this process, keyed by nonce, for on-chain submission. */
+const proofs = new Map<string, { proofHex: string; publicInputsHex: string; amount: number }>();
+
+/**
+ * Submit a stored proof to LeashPayment.executePayment with `cast send`.
+ * Needs LEASH_RPC_URL, LEASH_PAYMENT_CONTRACT_ADDRESS and LEASH_SENDER_ADDRESS, an account the node
+ * has unlocked (e.g. an Anvil dev account). No private key is handled here.
+ */
+function executeOnchain(nonce: string, recipientOverride?: string): ToolResult {
+  const rpc = process.env.LEASH_RPC_URL;
+  const contract = process.env.LEASH_PAYMENT_CONTRACT_ADDRESS;
+  const sender = process.env.LEASH_SENDER_ADDRESS;
+  if (!rpc || !contract || !sender) {
+    return fail('On-chain path not configured: set LEASH_RPC_URL, LEASH_PAYMENT_CONTRACT_ADDRESS and LEASH_SENDER_ADDRESS (an unlocked account).');
+  }
+  const stored = proofs.get(nonce);
+  if (!stored) return fail(`No proof for nonce '${nonce}' in this session; call leash_request_payment first.`);
+  const hex = stored.publicInputsHex.replace(/^0x/, '');
+  if (hex.length !== 5 * 64) return fail(`Expected 5 public inputs, got ${hex.length / 64}`);
+  const slot = (i: number) => '0x' + hex.slice(i * 64, (i + 1) * 64);
+  const provenRecipient = '0x' + slot(4).slice(-40);
+  const recipient = recipientOverride ?? provenRecipient;
+  try {
+    const out = execFileSync(
+      'cast',
+      [
+        'send', contract,
+        'executePayment(bytes32,uint256,bytes32,bytes32,address,bytes)',
+        slot(0), String(stored.amount), slot(2), slot(3), recipient, stored.proofHex,
+        '--value', String(stored.amount), '--rpc-url', rpc, '--unlocked', '--from', sender, '--json',
+      ],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1 << 24 }
+    );
+    const receipt = JSON.parse(out);
+    return ok({ released: receipt.status === '0x1', txHash: receipt.transactionHash, block: Number(receipt.blockNumber), recipient, amountWei: stored.amount });
+  } catch (err) {
+    const stderr = String((err as { stderr?: string }).stderr ?? err);
+    const reason = stderr.match(/revert(?:ed)?:?\s*([^\n]+)/i)?.[1] ?? stderr.split('\n').find((l) => l.trim()) ?? 'unknown';
+    return fail(`On-chain payment REJECTED by LeashPayment: ${reason.replace(/,? data: "0x[0-9a-fA-F]*"/, '').trim()}`);
+  }
+}
 
 export const TOOLS = [
   {
@@ -38,13 +81,26 @@ export const TOOLS = [
       properties: {
         merchant: { type: 'string', description: 'Merchant name, e.g. "openai"' },
         amountCents: { type: 'integer', minimum: 1, description: 'Amount in cents' },
-        nonce: { type: 'string', description: 'Unique nonce for this payment' },
+        nonce: { type: 'string', description: 'Unique nonce for this payment, as a decimal integer string' },
         recipient: {
           type: 'string',
           description: 'Payee 0x address; defaults to LEASH_RECIPIENT_ADDRESS',
         },
       },
       required: ['merchant', 'amountCents', 'nonce'],
+    },
+  },
+  {
+    name: 'leash_execute_onchain',
+    description:
+      'Submit the proof made for a nonce to the LeashPayment contract, which re-verifies it on chain, burns the nonce and releases exactly the proven amount (in wei) to the recipient. recipient defaults to the payee bound in the proof.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        nonce: { type: 'string', description: 'Nonce used in leash_request_payment' },
+        recipient: { type: 'string', description: 'Payee 0x address to send to (optional)' },
+      },
+      required: ['nonce'],
     },
   },
 ];
@@ -85,6 +141,8 @@ export async function callTool(
           return fail('nonce must be a non-empty string');
         }
         const recipient = typeof args.recipient === 'string' ? args.recipient : undefined;
+        // With a LeashPayment contract configured, prove for the EVM verifier (keccak transcript).
+        const useEvmTarget = Boolean(process.env.LEASH_PAYMENT_CONTRACT_ADDRESS);
 
         const proof = generatePaymentProof({
           policy: getDefaultPolicy(),
@@ -92,6 +150,7 @@ export async function callTool(
           amountCents,
           nonce,
           recipient,
+          useEvmTarget,
         });
         const verification = verifyPaymentProof({
           proofHex: proof.proofHex,
@@ -100,7 +159,11 @@ export async function callTool(
           expectedAmount: amountCents,
           expectedMerchantHash: proof.publicInputs.merchant_id_hash,
           expectedNonce: nonce,
+          useEvmTarget,
         });
+        if (verification.valid) {
+          proofs.set(nonce, { proofHex: proof.proofHex, publicInputsHex: proof.publicInputsHex, amount: amountCents });
+        }
         return ok({
           approved: verification.valid,
           publicInputs: proof.publicInputs,
@@ -109,11 +172,22 @@ export async function callTool(
           proofHex: proof.proofHex,
         });
       }
+      case 'leash_execute_onchain': {
+        if (typeof args.nonce !== 'string' || !args.nonce.trim()) return fail('nonce must be a non-empty string');
+        const r = args.recipient;
+        if (r !== undefined && (typeof r !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(r))) {
+          return fail('recipient must be a 0x-prefixed 20-byte address');
+        }
+        return executeOnchain(args.nonce, r as string | undefined);
+      }
       default:
         return fail(`Unknown tool: ${name}`);
     }
   } catch (err) {
-    return fail(err instanceof Error ? err.message : String(err));
+    // nargo/bb failures (e.g. a constraint the payment breaks) carry the reason on stderr.
+    const stderr = String((err as { stderr?: string }).stderr ?? '').trim();
+    const msg = err instanceof Error ? err.message.split('\n')[0] : String(err);
+    return fail(stderr ? `${msg}\n${stderr.slice(0, 600)}` : msg);
   }
 }
 
