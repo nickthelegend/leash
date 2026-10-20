@@ -7,6 +7,7 @@ import "../src/LeashVerifier.sol";
 interface Vm {
     function readFileBinary(string calldata path) external view returns (bytes memory);
     function prank(address) external;
+    function deal(address, uint256) external;
 }
 
 // Every test runs against the bb-generated HonkVerifier with a real proof from circuits/.
@@ -34,19 +35,23 @@ contract LeashPaymentTest {
         merchant = payable(address(uint160(recipient)));
     }
 
+    function _id(bytes32 c) internal view returns (bytes32) {
+        return payment.policyIdOf(address(this), c);
+    }
+
     function _proof() internal view returns (bytes memory) {
         return vm.readFileBinary("test/fixtures/proof");
     }
 
     function _pay(uint256 value, uint256 amt, bytes32 n, address payable to, bytes memory proof) internal {
-        payment.executePayment{value: value}(policyCommitment, amt, merchantHash, n, to, proof);
+        payment.executePayment{value: value}(address(this), policyCommitment, amt, merchantHash, n, to, proof);
     }
 
     // Asserts the call reverts (with `expected` when non-empty) and consumes no nonce.
     function _expectRevert(uint256 value, uint256 amt, bytes32 n, address payable to, bytes memory proof, string memory expected)
         internal
     {
-        try payment.executePayment{value: value}(policyCommitment, amt, merchantHash, n, to, proof) {
+        try payment.executePayment{value: value}(address(this), policyCommitment, amt, merchantHash, n, to, proof) {
             revert("expected revert");
         } catch Error(string memory reason) {
             if (bytes(expected).length != 0) {
@@ -56,12 +61,12 @@ contract LeashPaymentTest {
             // HonkVerifier rejects bad proofs with custom errors.
             require(bytes(expected).length == 0, "expected a string revert");
         }
-        require(!payment.usedNonces(policyCommitment, n), "nonce consumed on failure");
+        require(!payment.usedNonces(_id(policyCommitment), n), "nonce consumed on failure");
     }
 
     function test_policy_registration() public {
         payment.registerPolicy(policyCommitment);
-        require(payment.registeredPolicies(policyCommitment), "policy not registered");
+        require(payment.registeredPolicies(_id(policyCommitment)), "policy not registered");
     }
 
     function test_unregistered_policy_fails() public {
@@ -73,7 +78,7 @@ contract LeashPaymentTest {
         uint256 before = merchant.balance;
         _pay(amount, amount, nonce, merchant, _proof());
         require(merchant.balance == before + amount, "merchant not paid the proven amount");
-        require(payment.usedNonces(policyCommitment, nonce), "nonce not consumed");
+        require(payment.usedNonces(_id(policyCommitment), nonce), "nonce not consumed");
     }
 
     function test_real_proof_pays_from_contract_balance() public {
@@ -82,7 +87,7 @@ contract LeashPaymentTest {
         uint256 before = merchant.balance;
         _pay(0, amount, nonce, merchant, _proof());
         require(merchant.balance == before + amount, "merchant not paid");
-        require(payment.policyBalance(policyCommitment) == 0, "policy balance not spent");
+        require(payment.policyBalance(_id(policyCommitment)) == 0, "policy balance not spent");
         require(address(payment).balance == 0, "contract balance not spent");
     }
 
@@ -90,7 +95,7 @@ contract LeashPaymentTest {
         payment.registerPolicy(policyCommitment);
         bytes memory proof = _proof();
         _pay(amount, amount, nonce, merchant, proof);
-        try payment.executePayment{value: amount}(policyCommitment, amount, merchantHash, nonce, merchant, proof) {
+        try payment.executePayment{value: amount}(address(this), policyCommitment, amount, merchantHash, nonce, merchant, proof) {
             revert("replay must fail");
         } catch Error(string memory reason) {
             require(keccak256(bytes(reason)) == keccak256("Nonce already used"), reason);
@@ -136,11 +141,10 @@ contract LeashPaymentTest {
     // Funds deposited for another policy must not be spendable by a proof against ours.
     function test_cannot_spend_another_policys_deposit() public {
         bytes32 other = keccak256("victim policy");
-        payment.registerPolicy(other);
-        payment.deposit{value: amount}(other);
+        payment.registerPolicy{value: amount}(other);
         payment.registerPolicy(policyCommitment);
         _expectRevert(0, amount, nonce, merchant, _proof(), "Insufficient policy balance");
-        require(payment.policyBalance(other) == amount, "victim deposit touched");
+        require(payment.policyBalance(_id(other)) == amount, "victim deposit touched");
     }
 
     function test_policy_cannot_be_reregistered() public {
@@ -150,7 +154,7 @@ contract LeashPaymentTest {
         } catch Error(string memory r) {
             require(keccak256(bytes(r)) == keccak256("Policy already registered"), r);
         }
-        require(payment.policyOwner(policyCommitment) == address(this), "owner");
+        require(payment.policyOwner(_id(policyCommitment)) == address(this), "owner");
     }
 
     function test_plain_eth_transfer_rejected() public {
@@ -163,9 +167,9 @@ contract LeashPaymentTest {
         bytes32 other = keccak256("attacker policy");
         payment.registerPolicy(other);
         payment.registerPolicy(policyCommitment);
-        require(!payment.usedNonces(other, nonce) && !payment.usedNonces(policyCommitment, nonce), "fresh");
+        require(!payment.usedNonces(_id(other), nonce) && !payment.usedNonces(_id(policyCommitment), nonce), "fresh");
         _pay(amount, amount, nonce, merchant, _proof());
-        require(payment.usedNonces(policyCommitment, nonce), "ours consumed");
-        require(!payment.usedNonces(other, nonce), "nonce must be scoped per policy");
+        require(payment.usedNonces(_id(policyCommitment), nonce), "ours consumed");
+        require(!payment.usedNonces(_id(other), nonce), "nonce must be scoped per policy");
     }
 }

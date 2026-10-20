@@ -13,55 +13,65 @@ import "./LeashVerifier.sol";
 contract LeashPayment {
     IVerifier public immutable verifier;
 
-    // Committed policies allowed to execute payments
-    mapping(bytes32 => bool) public registeredPolicies;
-    // Nonce replay protection
-    // Nonces are scoped per policy: a global nonce set let anyone with their own policy
-    // front-run a victim's payment using the victim's nonce and block it ("Nonce already used").
-    mapping(bytes32 => mapping(bytes32 => bool)) public usedNonces;
-    // Escrow is per policy. registerPolicy is permissionless, so a single pooled balance could be
-    // drained by anyone who registers their own policy with a large cap and proves against it.
-    // A policy can only spend what was deposited for that policy.
-    mapping(bytes32 => uint256) public policyBalance;
-    mapping(bytes32 => address) public policyOwner;
+    // Policies are keyed by policyId = keccak256(abi.encode(owner, commitment)), not by the bare
+    // commitment. A commitment is public once broadcast, so keying by commitment let anyone copy a
+    // victim's commitment from the mempool, register it first, become its owner and withdraw what the
+    // victim later deposited. Now a copier only creates their own separate, empty policy.
+    mapping(bytes32 => bool) public registeredPolicies; // policyId => registered
+    // Nonces are scoped per policy so another policy cannot burn ours.
+    mapping(bytes32 => mapping(bytes32 => bool)) public usedNonces; // policyId => nonce => used
+    // Escrow is per policy: a policy can only spend what was deposited for that policy.
+    mapping(bytes32 => uint256) public policyBalance; // policyId => wei
+    mapping(bytes32 => address) public policyOwner; // policyId => owner
 
-    event PolicyRegistered(bytes32 indexed policyCommitment, address indexed owner);
-    event PolicyFunded(bytes32 indexed policyCommitment, address indexed from, uint256 amount);
+    event PolicyRegistered(bytes32 indexed policyId, bytes32 indexed policyCommitment, address indexed owner);
+    event PolicyFunded(bytes32 indexed policyId, address indexed from, uint256 amount);
     event PaymentReleased(
-        bytes32 indexed policyCommitment,
+        bytes32 indexed policyId,
         uint256 amount,
         bytes32 indexed merchantIdHash,
         bytes32 indexed nonce,
         address recipient
     );
-    event PolicyWithdrawn(bytes32 indexed policyCommitment, address indexed owner, address indexed to, uint256 amount);
+    event PolicyWithdrawn(bytes32 indexed policyId, address indexed owner, address indexed to, uint256 amount);
 
     constructor(address _verifier) {
         require(_verifier != address(0), "Invalid verifier address");
         verifier = IVerifier(_verifier);
     }
 
-    /**
-     * @notice Register a policy commitment hash. Only the hash is stored on-chain.
-     * @param policyCommitment Pedersen commitment of (merkle_root, max_per_tx, policy_salt)
-     */
-    function registerPolicy(bytes32 policyCommitment) external {
-        require(policyCommitment != bytes32(0), "Invalid policy commitment");
-        require(!registeredPolicies[policyCommitment], "Policy already registered");
-        registeredPolicies[policyCommitment] = true;
-        policyOwner[policyCommitment] = msg.sender;
-        emit PolicyRegistered(policyCommitment, msg.sender);
+    function policyIdOf(address owner, bytes32 policyCommitment) public pure returns (bytes32) {
+        return keccak256(abi.encode(owner, policyCommitment));
     }
 
-    /// @notice Deposit funds that only proofs against `policyCommitment` can release.
+    /**
+     * @notice Register a policy commitment for msg.sender, optionally funding its escrow in the same call.
+     * @param policyCommitment Pedersen commitment of (merkle_root, max_per_tx, policy_salt)
+     */
+    function registerPolicy(bytes32 policyCommitment) external payable returns (bytes32 policyId) {
+        require(policyCommitment != bytes32(0), "Invalid policy commitment");
+        policyId = policyIdOf(msg.sender, policyCommitment);
+        require(!registeredPolicies[policyId], "Policy already registered");
+        registeredPolicies[policyId] = true;
+        policyOwner[policyId] = msg.sender;
+        emit PolicyRegistered(policyId, policyCommitment, msg.sender);
+        if (msg.value > 0) {
+            policyBalance[policyId] += msg.value;
+            emit PolicyFunded(policyId, msg.sender, msg.value);
+        }
+    }
+
+    /// @notice Owner-only deposit into msg.sender's policy for `policyCommitment`.
     function deposit(bytes32 policyCommitment) external payable {
-        require(registeredPolicies[policyCommitment], "Policy not registered");
-        policyBalance[policyCommitment] += msg.value;
-        emit PolicyFunded(policyCommitment, msg.sender, msg.value);
+        bytes32 policyId = policyIdOf(msg.sender, policyCommitment);
+        require(policyOwner[policyId] == msg.sender, "Not policy owner");
+        policyBalance[policyId] += msg.value;
+        emit PolicyFunded(policyId, msg.sender, msg.value);
     }
 
     /**
      * @notice Releases payment to a merchant recipient upon verifying a valid ZK proof.
+     * @param owner Owner of the policy (anyone may relay; funds come from owner's policy escrow)
      * @param policyCommitment Commitment to the policy governing this payment
      * @param amount Amount in smallest units (e.g. cents or wei)
      * @param merchantIdHash Pedersen hash of merchant ID
@@ -70,6 +80,7 @@ contract LeashPayment {
      * @param proof UltraHonk ZK proof generated by Noir / bb
      */
     function executePayment(
+        address owner,
         bytes32 policyCommitment,
         uint256 amount,
         bytes32 merchantIdHash,
@@ -77,8 +88,9 @@ contract LeashPayment {
         address payable recipient,
         bytes calldata proof
     ) external payable {
-        require(registeredPolicies[policyCommitment], "Policy not registered");
-        require(!usedNonces[policyCommitment][nonce], "Nonce already used");
+        bytes32 policyId = policyIdOf(owner, policyCommitment);
+        require(registeredPolicies[policyId], "Policy not registered");
+        require(!usedNonces[policyId][nonce], "Nonce already used");
         require(recipient != address(0), "Invalid recipient");
 
         // Format public inputs matching the Noir circuit ABI. The payee address fills the
@@ -93,32 +105,34 @@ contract LeashPayment {
         bool verified = verifier.verify(proof, publicInputs);
         require(verified, "Invalid ZK proof");
 
-        usedNonces[policyCommitment][nonce] = true;
+        usedNonces[policyId][nonce] = true;
 
         // Release exactly the proven amount. Never emit PaymentReleased without moving funds.
         if (msg.value > 0) {
             require(msg.value == amount, "msg.value must equal proven amount");
         } else {
-            require(policyBalance[policyCommitment] >= amount, "Insufficient policy balance");
-            policyBalance[policyCommitment] -= amount;
+            require(policyBalance[policyId] >= amount, "Insufficient policy balance");
+            policyBalance[policyId] -= amount;
         }
         (bool success, ) = recipient.call{value: amount}("");
         require(success, "Payment transfer failed");
 
-        emit PaymentReleased(policyCommitment, amount, merchantIdHash, nonce, recipient);
+        emit PaymentReleased(policyId, amount, merchantIdHash, nonce, recipient);
     }
 
     /**
-     * @notice Lets the policy owner reclaim escrow deposited for their policy.
-     * Only the policy's own balance can be withdrawn; other policies' escrow is untouched.
+     * @notice Lets the policy owner reclaim escrow deposited for their policy (msg.sender's policy
+     * for `policyCommitment`). Other policies' escrow, including copies of the same commitment
+     * registered by other accounts, is untouched.
      */
     function withdraw(bytes32 policyCommitment, uint256 amount, address payable to) external {
-        require(msg.sender == policyOwner[policyCommitment], "Not policy owner");
+        bytes32 policyId = policyIdOf(msg.sender, policyCommitment);
+        require(policyOwner[policyId] == msg.sender, "Not policy owner");
         require(to != address(0), "Invalid recipient");
-        require(policyBalance[policyCommitment] >= amount, "Insufficient policy balance");
-        policyBalance[policyCommitment] -= amount; // effects before interaction
+        require(policyBalance[policyId] >= amount, "Insufficient policy balance");
+        policyBalance[policyId] -= amount; // effects before interaction
         (bool success, ) = to.call{value: amount}("");
         require(success, "Withdraw transfer failed");
-        emit PolicyWithdrawn(policyCommitment, msg.sender, to, amount);
+        emit PolicyWithdrawn(policyId, msg.sender, to, amount);
     }
 }

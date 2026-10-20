@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    name: forge test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: forge test
+        working-directory: contracts
+        run: forge test -vv
+
+  full:
+    name: pnpm test (packages + circuits + contracts)
+    runs-on: ubuntu-latest
+    env:
+      NARGO_VERSION: 1.0.0-beta.16
+      BB_VERSION: 3.0.1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Install pinned nargo and bb into .tools (see TOOLCHAIN.md)
+        run: |
+          mkdir -p .tools
+          curl -fsSL "https://github.com/noir-lang/noir/releases/download/v${NARGO_VERSION}/nargo-x86_64-unknown-linux-gnu.tar.gz" | tar xz -C .tools nargo
+          curl -fsSL "https://github.com/AztecProtocol/aztec-packages/releases/download/v${BB_VERSION}/barretenberg-amd64-linux.tar.gz" | tar xz -C .tools bb
+          .tools/nargo --version
+          .tools/bb --version
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run pretest
+      - run: pnpm test

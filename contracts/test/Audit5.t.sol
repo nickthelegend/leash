@@ -22,8 +22,8 @@ contract Audit5Test is LeashPaymentTest {
         uint256 b = merchant.balance;
         _pay(amount, amount, nonce, merchant, _proof());
         require(merchant.balance == b + amount, "paid");
-        require(payment.usedNonces(policyCommitment, nonce), "nonce");
-        try payment.executePayment{value: amount}(policyCommitment, amount, merchantHash, nonce, merchant, _proof()) {
+        require(payment.usedNonces(_id(policyCommitment), nonce), "nonce");
+        try payment.executePayment{value: amount}(address(this), policyCommitment, amount, merchantHash, nonce, merchant, _proof()) {
             revert("replay accepted");
         } catch Error(string memory r) { require(keccak256(bytes(r)) == keccak256("Nonce already used"), r); }
     }

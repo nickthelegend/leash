@@ -23,6 +23,7 @@ cast block-number --rpc-url "$RPC" >/dev/null || { echo "anvil did not start" >&
 
 FROM=(--unlocked --from "$SENDER")
 cd contracts
+# Policies are keyed by (owner, commitment): SENDER registers and owns the demo policy.
 # HonkVerifier links the external library ZKTranscriptLib, so deploy that first.
 LIB=$(forge create src/LeashVerifier.sol:ZKTranscriptLib --rpc-url "$RPC" "${FROM[@]}" --broadcast --json | jq -er .deployedTo)
 VERIFIER=$(forge create src/LeashVerifier.sol:HonkVerifier --libraries "src/LeashVerifier.sol:ZKTranscriptLib:$LIB" \
@@ -36,6 +37,7 @@ cat > .demo/anvil.env <<ENV
 LEASH_RPC_URL=$RPC
 LEASH_PAYMENT_CONTRACT_ADDRESS=$PAYMENT
 LEASH_SENDER_ADDRESS=$SENDER
+LEASH_POLICY_OWNER_ADDRESS=$SENDER
 LEASH_RECIPIENT_ADDRESS=$PAYEE
 ENV
 echo "anvil $RPC  verifier $VERIFIER  LeashPayment $PAYMENT"

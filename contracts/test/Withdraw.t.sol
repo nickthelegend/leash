@@ -17,7 +17,7 @@ contract WithdrawTest is LeashPaymentTest {
         uint256 b = SINK.balance;
         payment.withdraw(policyCommitment, 400, SINK);
         require(SINK.balance == b + 400, "sink paid");
-        require(payment.policyBalance(policyCommitment) == 600, "balance reduced");
+        require(payment.policyBalance(_id(policyCommitment)) == 600, "balance reduced");
         require(address(payment).balance == 600, "contract balance");
     }
 
@@ -26,7 +26,7 @@ contract WithdrawTest is LeashPaymentTest {
         payment.deposit{value: 1000}(policyCommitment);
         vm.prank(ATTACKER);
         _expectWithdrawRevert(policyCommitment, 1, ATTACKER, "Not policy owner");
-        require(payment.policyBalance(policyCommitment) == 1000, "untouched");
+        require(payment.policyBalance(_id(policyCommitment)) == 1000, "untouched");
     }
 
     function test_unregistered_policy_withdraw_reverts() public {
@@ -37,20 +37,20 @@ contract WithdrawTest is LeashPaymentTest {
         payment.registerPolicy(policyCommitment);
         payment.deposit{value: 1000}(policyCommitment);
         _expectWithdrawRevert(policyCommitment, 1001, SINK, "Insufficient policy balance");
-        require(payment.policyBalance(policyCommitment) == 1000, "untouched");
+        require(payment.policyBalance(_id(policyCommitment)) == 1000, "untouched");
     }
 
     // Owner of policy A cannot pull escrow belonging to policy B, even when the contract holds it.
     function test_withdraw_cannot_touch_other_policy() public {
         bytes32 victim = keccak256("victim policy");
+        vm.deal(ATTACKER, 1000);
         vm.prank(ATTACKER);
-        payment.registerPolicy(victim);
-        payment.deposit{value: 1000}(victim);
+        payment.registerPolicy{value: 1000}(victim);
         payment.registerPolicy(policyCommitment);
         payment.deposit{value: 10}(policyCommitment);
         _expectWithdrawRevert(policyCommitment, 11, SINK, "Insufficient policy balance");
         _expectWithdrawRevert(victim, 1, SINK, "Not policy owner");
-        require(payment.policyBalance(victim) == 1000, "victim escrow touched");
+        require(payment.policyBalance(payment.policyIdOf(ATTACKER, victim)) == 1000, "victim escrow touched");
         require(address(payment).balance == 1010, "contract balance");
     }
 
@@ -65,6 +65,6 @@ contract WithdrawTest is LeashPaymentTest {
         uint256 b = merchant.balance;
         _pay(0, amount, nonce, merchant, _proof());
         require(merchant.balance == b + amount, "paid");
-        require(payment.policyBalance(policyCommitment) == 0, "drained exactly");
+        require(payment.policyBalance(_id(policyCommitment)) == 0, "drained exactly");
     }
 }

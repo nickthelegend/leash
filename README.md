@@ -82,24 +82,36 @@ constraint: `nargo execute` refuses a 900-cent witness (`Amount exceeds per-tran
 about `max_per_tx` breaks the policy commitment, and a 300-cent proof resubmitted as 900 fails in the
 on-chain verifier (`SumcheckFailed`). `leash_execute_onchain` refuses any chain whose id is not 31337.
 
-Funds released without `msg.value` come from a per-policy escrow (`deposit(bytes32)`), never a shared
-pool: `registerPolicy` is permissionless, so a pooled balance could be drained by anyone who
-registers their own high-cap policy. A commitment can be registered only once.
+Funds released without `msg.value` come from a per-policy escrow, never a shared pool. Policies are
+keyed by `policyId = keccak256(abi.encode(owner, commitment))`, so each account registers its own
+policy and only that account can fund (`registerPolicy{value}` / `deposit`) or withdraw it. See
+"Security".
 
 The script compiles the circuit and writes the EVM verification key (`circuits/target/vk_evm`) if
 they are missing. Stop the chain with `kill "$(cat .demo/anvil.pid)"`.
 
 ## Security
 
-- **Per-policy escrow.** Funds released without `msg.value` come only from the escrow deposited for
-  that policy commitment (`deposit(bytes32)`). Registration is permissionless, so a shared pool would
-  let anyone register a high-cap policy and drain it; per-policy balances close that hole.
-- **Owner withdraw.** The address that registered a policy (`policyOwner`) can reclaim its unspent
-  escrow with `withdraw(bytes32 commitment, uint256 amount, address payable to)`. It reverts for
-  anyone else and for amounts above that policy's balance, never touches other policies' escrow,
-  updates the balance before transferring, and emits `PolicyWithdrawn`.
-- **Bound proofs.** The cap, merchant allowlist, nonce (scoped per policy) and recipient are all
-  public inputs of the ZK proof, so changing any of them fails on-chain verification.
+- **Policies keyed by owner.** On-chain policies are keyed by
+  `policyId = keccak256(abi.encode(owner, commitment))` (`policyIdOf(owner, commitment)`), not by the
+  bare commitment. A commitment is visible in the mempool once sent, so keying by commitment let an
+  attacker register a victim's commitment first, become its owner and withdraw whatever the victim
+  deposited. Now a copied commitment only creates the copier's own empty policy: the victim still
+  registers, and the copy can never touch the victim's escrow or nonces (`test/FrontRun.t.sol`).
+- **Owner-only funding.** `registerPolicy(bytes32)` is `payable` and credits `msg.value` to the new
+  policy's escrow (emitting `PolicyFunded`). `deposit(bytes32)` funds msg.sender's own policy and
+  reverts with `Not policy owner` otherwise, so ETH can't be sent to a policy the sender doesn't own.
+- **Per-policy escrow.** Funds released without `msg.value` come only from the escrow of the policy
+  named in `executePayment(owner, commitment, ...)`. Anyone may relay a payment, but it can only spend
+  that policy's balance, so registering a high-cap policy never reaches anyone else's funds.
+- **Owner withdraw.** `withdraw(bytes32 commitment, uint256 amount, address payable to)` acts on
+  msg.sender's policy for that commitment. It reverts for non-owners and for amounts above that
+  policy's balance, updates the balance before transferring, and emits `PolicyWithdrawn`.
+- **Bound proofs.** The amount, merchant hash, nonce (scoped per policy) and recipient are public
+  inputs of the ZK proof. The cap and merchant allowlist are private inputs bound through
+  `policy_commitment`, so changing any of them fails verification. The proof is not bound to the
+  owner address; a proof relayed against someone else's copy of the commitment can only spend that
+  copy's own (attacker-funded) escrow.
 
 ## Sponsor technology: PayPal
 

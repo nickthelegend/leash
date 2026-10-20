@@ -25,6 +25,7 @@ const proofs = new Map<string, { proofHex: string; publicInputsHex: string; amou
  * Submit a stored proof to LeashPayment.executePayment with `cast send`.
  * Needs LEASH_RPC_URL, LEASH_PAYMENT_CONTRACT_ADDRESS and LEASH_SENDER_ADDRESS, an account the node
  * has unlocked (e.g. an Anvil dev account). No private key is handled here.
+ * LEASH_POLICY_OWNER_ADDRESS (optional, defaults to the sender) selects whose policy pays.
  */
 function executeOnchain(nonce: string, recipientOverride?: string): ToolResult {
   const rpc = process.env.LEASH_RPC_URL;
@@ -44,6 +45,8 @@ function executeOnchain(nonce: string, recipientOverride?: string): ToolResult {
   if (chainId !== '31337') {
     return fail(`Refusing to send: chain id ${chainId} is not a local dev chain (31337). leash_execute_onchain uses an unlocked node account and is for Anvil only.`);
   }
+  // Policies are keyed by (owner, commitment) on-chain; the policy owner defaults to the sender.
+  const owner = process.env.LEASH_POLICY_OWNER_ADDRESS ?? sender;
   const stored = proofs.get(nonce);
   if (!stored) return fail(`No proof for nonce '${nonce}' in this session; call leash_request_payment first.`);
   const hex = stored.publicInputsHex.replace(/^0x/, '');
@@ -56,8 +59,8 @@ function executeOnchain(nonce: string, recipientOverride?: string): ToolResult {
       'cast',
       [
         'send', contract,
-        'executePayment(bytes32,uint256,bytes32,bytes32,address,bytes)',
-        slot(0), String(stored.amount), slot(2), slot(3), recipient, stored.proofHex,
+        'executePayment(address,bytes32,uint256,bytes32,bytes32,address,bytes)',
+        owner, slot(0), String(stored.amount), slot(2), slot(3), recipient, stored.proofHex,
         '--value', String(stored.amount), '--rpc-url', rpc, '--unlocked', '--from', sender, '--json',
       ],
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1 << 24 }
