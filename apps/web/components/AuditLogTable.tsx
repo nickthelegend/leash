@@ -12,7 +12,7 @@ export interface AuditLogItem {
   merchantIdHash: string;
   nonce: string;
   proofVerified: boolean;
-  status: 'COMPLETED' | 'REJECTED';
+  status: 'COMPLETED' | 'REJECTED' | 'FAILED';
   rejectionReason?: string;
   paypalOrderId?: string;
   paypalStatus?: string;
@@ -96,7 +96,7 @@ export function AuditLogTable({
                         className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-red-500/10 text-red-400 border border-red-500/30"
                         title={log.rejectionReason}
                       >
-                        <XCircle className="w-3 h-3" /> BLOCKED
+                        <XCircle className="w-3 h-3" /> {log.status === 'FAILED' ? 'NOT PAID' : 'BLOCKED'}
                       </span>
                     )}
                   </td>

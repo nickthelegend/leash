@@ -113,6 +113,9 @@ export async function POST(req: NextRequest) {
       nonceStr
     );
 
+    // Only a real PayPal capture counts as paid. A verified proof with no dispatched or failed
+    // PayPal order is logged as FAILED and returned as an error, never as success.
+    const paid = paypalResult.success === true;
     const logEntry = {
       id: `log_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       timestamp: new Date().toISOString(),
@@ -121,12 +124,26 @@ export async function POST(req: NextRequest) {
       merchantIdHash,
       nonce: nonceStr,
       proofVerified: true,
-      status: 'COMPLETED' as const,
+      status: paid ? ('COMPLETED' as const) : ('FAILED' as const),
+      ...(paid ? {} : { rejectionReason: paypalResult.error || 'PayPal order was not completed' }),
       paypalOrderId: paypalResult.orderId,
       paypalStatus: paypalResult.status,
       durationMs: Date.now() - startTime,
     };
     nonceStore.addAuditEntry(logEntry);
+
+    if (!paid) {
+      return NextResponse.json(
+        {
+          success: false,
+          verified: true,
+          nonce: nonceStr,
+          error: `Proof verified, but no payment was made: ${paypalResult.error || 'PayPal order was not completed'}`,
+          paypal: paypalResult,
+        },
+        { status: paypalResult.configured === false ? 503 : 502 }
+      );
+    }
 
     return NextResponse.json({
       success: true,
