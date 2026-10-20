@@ -17,6 +17,7 @@ export interface ZKProofData {
     nonce: string;
   };
   rejectionReason?: string;
+  setupError?: boolean;
   verifiedAt?: string;
 }
 
@@ -161,7 +162,9 @@ export function ZKProofIndicator({
           {isVerified
             ? 'UltraHonk Proof Verified for Real'
             : isRejected
-            ? 'Payment Blocked: Circuit Constraint Failed'
+            ? proofData?.setupError
+              ? 'Setup Required: Prover Not Configured'
+              : 'Payment Blocked: Circuit Constraint Failed'
             : isProving
             ? 'Generating Zero-Knowledge Witness...'
             : 'Awaiting Agent Spending Request'}

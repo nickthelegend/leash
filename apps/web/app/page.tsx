@@ -150,6 +150,14 @@ export default function Home() {
 
       const proveData = await proveRes.json();
 
+      if (!proveData.success && proveData.kind === 'setup') {
+        // Missing configuration is not a policy decision: show it, but don't log a BLOCKED payment.
+        setZkStatus('rejected');
+        setZkProofData({ setupError: true, rejectionReason: proveData.error || `Prover unavailable (HTTP ${proveRes.status})` });
+        setIsLoading(false);
+        return;
+      }
+
       if (!proveData.success) {
         // Circuit violation (e.g. over cap or unlisted merchant)
         setZkStatus('rejected');

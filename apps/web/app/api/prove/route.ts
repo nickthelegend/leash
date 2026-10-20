@@ -38,12 +38,17 @@ export async function POST(req: NextRequest) {
       ...proofResult,
     });
   } catch (err: any) {
+    // Setup problems (missing recipient, bb/nargo, keys) are not policy decisions: report them
+    // as 503 "setup" so the UI never shows them as a circuit block.
+    const message = String(err?.message ?? err);
+    const isSetup = /not configured|not found on PATH|Install via|Generate the key|ENOENT|LEASH_RECIPIENT_ADDRESS/i.test(message);
     return NextResponse.json(
       {
         success: false,
-        error: err.message,
+        kind: isSetup ? 'setup' : 'constraint',
+        error: message,
       },
-      { status: 400 }
+      { status: isSetup ? 503 : 422 }
     );
   }
 }
