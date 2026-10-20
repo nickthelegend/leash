@@ -109,11 +109,11 @@ they are missing. Stop the chain with `kill "$(cat .demo/anvil.pid)"`.
 - **Owner withdraw.** `withdraw(bytes32 commitment, uint256 amount, address payable to)` acts on
   msg.sender's policy for that commitment. It reverts for non-owners and for amounts above that
   policy's balance, updates the balance before transferring, and emits `PolicyWithdrawn`.
-- **Bound proofs.** The amount, merchant hash, nonce (scoped per policy) and recipient are public
-  inputs of the ZK proof. The cap and merchant allowlist are private inputs bound through
-  `policy_commitment`, so changing any of them fails verification. The proof is not bound to the
-  owner address; a proof relayed against someone else's copy of the commitment can only spend that
-  copy's own (attacker-funded) escrow.
+- **Bound proofs.** The policy commitment, amount (in cents), merchant hash, nonce (scoped per
+  policy) and recipient are the public inputs of the ZK proof, so changing any of them fails
+  on-chain verification. The cap and merchant allowlist stay private: the circuit binds them to the
+  policy commitment. The proof is not bound to the owner address; a proof relayed against someone
+  else's copy of the commitment can only spend that copy's own (attacker-funded) escrow.
 
 ## Sponsor technology: PayPal
 
