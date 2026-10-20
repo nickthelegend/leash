@@ -66,6 +66,8 @@ Environment (`.env.example`): `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPA
 used. Point an MCP client at `packages/leash-mcp/dist/index.js` with that environment (and the
 pinned `.tools` on `PATH`); `leash_request_payment` then proves for the EVM verifier and
 `leash_execute_onchain` submits the proof to `LeashPayment.executePayment`.
+Set `LEASH_MCP_LOG=<file>` to have leash-mcp append every tool call and its exact result to that
+file as JSON lines.
 
 Recorded on 2026-10-20 with opencode driving OpenRouter `minimax/minimax-m3.1-flash:free` through
 leash-mcp, nothing mocked:

@@ -17,6 +17,7 @@ import {
   verifyPaymentProof,
 } from '@leash/core';
 import { execFileSync } from 'node:child_process';
+import { appendFileSync } from 'node:fs';
 
 /** Proofs made by leash_request_payment in this process, keyed by nonce, for on-chain submission. */
 const proofs = new Map<string, { proofHex: string; publicInputsHex: string; amount: number }>();
@@ -212,15 +213,36 @@ export async function callTool(
   }
 }
 
+/**
+ * With LEASH_MCP_LOG set, append each tool call and its exact result to that file as one JSON line,
+ * so a demo can show what the tools returned rather than the agent's paraphrase of it.
+ */
+function logToolCall(tool: string, args: Record<string, unknown>, result: ToolResult): void {
+  const file = process.env.LEASH_MCP_LOG;
+  if (!file) return;
+  const text = result.content.map((c) => c.text).join('\n');
+  let parsed: unknown = text;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    // Errors are plain text; keep them as a string.
+  }
+  const line = { ts: new Date().toISOString(), tool, args, isError: Boolean(result.isError), result: parsed };
+  appendFileSync(file, JSON.stringify(line) + '\n');
+}
+
 export function createServer(): Server {
   const server = new Server(
     { name: 'leash-mcp', version: '1.0.0' },
     { capabilities: { tools: {} } }
   );
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
-  server.setRequestHandler(CallToolRequestSchema, async (req) =>
-    callTool(req.params.name, (req.params.arguments ?? {}) as Record<string, unknown>)
-  );
+  server.setRequestHandler(CallToolRequestSchema, async (req) => {
+    const args = (req.params.arguments ?? {}) as Record<string, unknown>;
+    const result = await callTool(req.params.name, args);
+    logToolCall(req.params.name, args, result);
+    return result;
+  });
   return server;
 }
 
