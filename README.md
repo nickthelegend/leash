@@ -77,7 +77,17 @@ leash-mcp, nothing mocked:
 | nonce 3001 again | **Blocked** on chain: `Nonce already used` |
 | openai, 200 cents, proof bound to Anvil #1 but sent to Anvil #2 | **Blocked** on chain: verifier `SumcheckFailed`, Anvil #2 got 0 wei |
 
-Stop the chain with `kill "$(cat .demo/anvil.pid)"`.
+The 900-cent attempt stops in leash-mcp's policy check before proving, but the cap is also a circuit
+constraint: `nargo execute` refuses a 900-cent witness (`Amount exceeds per-transaction cap`), lying
+about `max_per_tx` breaks the policy commitment, and a 300-cent proof resubmitted as 900 fails in the
+on-chain verifier (`SumcheckFailed`). `leash_execute_onchain` refuses any chain whose id is not 31337.
+
+Funds released without `msg.value` come from a per-policy escrow (`deposit(bytes32)`), never a shared
+pool: `registerPolicy` is permissionless, so a pooled balance could be drained by anyone who
+registers their own high-cap policy. A commitment can be registered only once.
+
+The script compiles the circuit and writes the EVM verification key (`circuits/target/vk_evm`) if
+they are missing. Stop the chain with `kill "$(cat .demo/anvil.pid)"`.
 
 ## Sponsor technology: PayPal
 

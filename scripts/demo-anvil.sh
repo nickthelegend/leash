@@ -11,6 +11,11 @@ RPC="http://127.0.0.1:${ANVIL_PORT:-8545}"
 SENDER=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266                             # Anvil account #0 (unlocked)
 PAYEE=0x70997970C51812dc3A010C7d01b50e0d17dc79C8                              # Anvil account #1
 
+# leash-mcp proves for the EVM verifier, which needs the compiled circuit and its EVM vk.
+if [ ! -f circuits/target/vk_evm/vk ]; then
+  (cd circuits && nargo compile && bb write_vk -b target/leash_circuit.json -t evm -o target/vk_evm) >/dev/null
+fi
+
 anvil --port "${ANVIL_PORT:-8545}" --code-size-limit 200000 --silent > .demo/anvil.log 2>&1 &
 echo $! > .demo/anvil.pid
 for _ in $(seq 30); do cast block-number --rpc-url "$RPC" >/dev/null 2>&1 && break; sleep 0.5; done

@@ -33,6 +33,17 @@ function executeOnchain(nonce: string, recipientOverride?: string): ToolResult {
   if (!rpc || !contract || !sender) {
     return fail('On-chain path not configured: set LEASH_RPC_URL, LEASH_PAYMENT_CONTRACT_ADDRESS and LEASH_SENDER_ADDRESS (an unlocked account).');
   }
+  // Sends use eth_sendTransaction from a node-unlocked account, which only dev nodes offer.
+  // Refuse anything that is not a local Anvil/Hardhat chain (chain id 31337).
+  let chainId: string;
+  try {
+    chainId = execFileSync('cast', ['chain-id', '--rpc-url', rpc], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  } catch (err) {
+    return fail(`Could not read chain id from ${rpc}: ${String((err as { stderr?: string }).stderr ?? err).trim()}`);
+  }
+  if (chainId !== '31337') {
+    return fail(`Refusing to send: chain id ${chainId} is not a local dev chain (31337). leash_execute_onchain uses an unlocked node account and is for Anvil only.`);
+  }
   const stored = proofs.get(nonce);
   if (!stored) return fail(`No proof for nonce '${nonce}' in this session; call leash_request_payment first.`);
   const hex = stored.publicInputsHex.replace(/^0x/, '');
@@ -54,9 +65,13 @@ function executeOnchain(nonce: string, recipientOverride?: string): ToolResult {
     const receipt = JSON.parse(out);
     return ok({ released: receipt.status === '0x1', txHash: receipt.transactionHash, block: Number(receipt.blockNumber), recipient, amountWei: stored.amount });
   } catch (err) {
-    const stderr = String((err as { stderr?: string }).stderr ?? err);
-    const reason = stderr.match(/revert(?:ed)?:?\s*([^\n]+)/i)?.[1] ?? stderr.split('\n').find((l) => l.trim()) ?? 'unknown';
-    return fail(`On-chain payment REJECTED by LeashPayment: ${reason.replace(/,? data: "0x[0-9a-fA-F]*"/, '').trim()}`);
+    // cast --json reports errors as JSON on stdout (cast 1.x), older versions on stderr.
+    const e = err as { stderr?: string; stdout?: string };
+    const stderr = [e.stdout, e.stderr].filter(Boolean).join('\n') || String(err);
+    const reason = stderr.match(/reverted:?\s*([^,"\n]+)/i)?.[1] ?? stderr.split('\n').find((l) => l.trim()) ?? 'unknown';
+    const known: Record<string, string> = { '0x9fc3a218': 'SumcheckFailed (proof does not verify for these public inputs)' };
+    const named = reason.replace(/custom error (0x[0-9a-fA-F]{8})/, (m, sel: string) => known[sel.toLowerCase()] ?? m);
+    return fail(`On-chain payment REJECTED by LeashPayment: ${named.replace(/,? data: "0x[0-9a-fA-F]*"/, '').trim()}`);
   }
 }
 
