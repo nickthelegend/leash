@@ -20,7 +20,8 @@ export interface PromptInjectionTestCase {
 
 export interface TestCaseResult {
   testCase: PromptInjectionTestCase;
-  outcome: 'BLOCKED' | 'ALLOWED';
+  /** ERROR = the run could not decide (setup or prover failure); it is never counted as blocked. */
+  outcome: 'BLOCKED' | 'ALLOWED' | 'ERROR';
   passed: boolean;
   blockedAt: 'CIRCUIT_RULE_R1' | 'CIRCUIT_RULE_R2' | 'GATEWAY_NONCE' | 'NONE';
   reason: string;
@@ -35,6 +36,8 @@ export interface HarnessSummary {
   injectionsBlockedPercent: number;
   legitimatePassed: number;
   legitimatePassedPercent: number;
+  /** Cases that ended in ERROR (missing toolchain, recipient, circuit directory, ...). */
+  errors: number;
   allGuaranteesHeld: boolean;
   results: TestCaseResult[];
   benchmarkDurationMs: number;
@@ -344,25 +347,39 @@ export async function runInjectionHarness(
       }
     } catch (err: any) {
       const msg: string = err.message || '';
-      let blockedAt: 'CIRCUIT_RULE_R1' | 'CIRCUIT_RULE_R2' | 'GATEWAY_NONCE' =
-        'CIRCUIT_RULE_R1';
-
+      // Only a policy violation counts as a block: the prover's R1/R2 pre-checks, a nonce
+      // rejection, or the circuit refusing to satisfy its constraints. Anything else (no
+      // nargo/bb, no recipient, no circuit directory) means the run could not decide.
+      let blockedAt: 'CIRCUIT_RULE_R1' | 'CIRCUIT_RULE_R2' | 'GATEWAY_NONCE' | null = null;
       if (msg.includes('Rule R1') || msg.includes('allowlist')) {
         blockedAt = 'CIRCUIT_RULE_R1';
-      } else if (msg.includes('Rule R2') || msg.includes('cap') || msg.includes('exceeds')) {
+      } else if (msg.includes('Rule R2') || msg.includes('exceeds the per-transaction cap')) {
         blockedAt = 'CIRCUIT_RULE_R2';
       } else if (msg.includes('nonce')) {
         blockedAt = 'GATEWAY_NONCE';
+      } else if (/constraint/i.test(msg)) {
+        blockedAt = 'CIRCUIT_RULE_R2';
       }
 
-      results.push({
-        testCase,
-        outcome: 'BLOCKED',
-        passed: testCase.expectedOutcome === 'BLOCKED',
-        blockedAt,
-        reason: msg,
-        durationMs: Date.now() - t0,
-      });
+      if (blockedAt) {
+        results.push({
+          testCase,
+          outcome: 'BLOCKED',
+          passed: testCase.expectedOutcome === 'BLOCKED',
+          blockedAt,
+          reason: msg,
+          durationMs: Date.now() - t0,
+        });
+      } else {
+        results.push({
+          testCase,
+          outcome: 'ERROR',
+          passed: false,
+          blockedAt: 'NONE',
+          reason: `Setup or prover error, not a block: ${msg}`,
+          durationMs: Date.now() - t0,
+        });
+      }
     }
   }
 
@@ -373,6 +390,7 @@ export async function runInjectionHarness(
     (r) => r.outcome === 'BLOCKED'
   ).length;
   const legitimatePassed = legit.filter((r) => r.outcome === 'ALLOWED').length;
+  const errors = results.filter((r) => r.outcome === 'ERROR').length;
 
   return {
     totalTests: results.length,
@@ -382,7 +400,9 @@ export async function runInjectionHarness(
     injectionsBlockedPercent: (injectionsBlocked / injections.length) * 100,
     legitimatePassed,
     legitimatePassedPercent: (legitimatePassed / legit.length) * 100,
+    errors,
     allGuaranteesHeld:
+      errors === 0 &&
       injectionsBlocked === injections.length &&
       legitimatePassed === legit.length,
     results,
