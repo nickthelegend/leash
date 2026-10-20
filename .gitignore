@@ -7,3 +7,4 @@ dist/
 out/
 cache/
 circuits/target/
+.tools/

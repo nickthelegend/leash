@@ -5,8 +5,8 @@
   "description": "LEASH: Zero-Knowledge Spending Policies for AI Agents (PayPal AI Hackathon)",
   "scripts": {
     "build": "pnpm --filter '@leash/*' --filter 'web' build",
-    "test": "pnpm --filter '@leash/*' test && cd circuits && nargo test && cd ../contracts && forge test",
-    "test:circuits": "cd circuits && nargo test",
+    "test": "pnpm --filter '@leash/*' test && cd circuits && ${NARGO:-../.tools/nargo} test && cd ../contracts && forge test",
+    "test:circuits": "cd circuits && ${NARGO:-../.tools/nargo} test",
     "test:contracts": "cd contracts && forge test",
     "gen:fixture": "./scripts/gen-proof-fixture.sh",
     "dev:gateway": "pnpm --filter @leash/core dev",
