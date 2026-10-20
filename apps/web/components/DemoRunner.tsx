@@ -1,17 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import {
-  Play,
-  CheckCircle2,
-  XCircle,
-  Timer,
-  Zap,
-  ShieldCheck,
-  ShieldAlert,
-  ArrowRight,
-  Flame,
-} from 'lucide-react';
+import { Play, Timer, ShieldCheck, ShieldAlert, Loader2, Check } from 'lucide-react';
 
 interface DemoRunnerProps {
   onRunLegitDemo: () => Promise<void>;
@@ -49,117 +39,114 @@ export function DemoRunner({
     }
   };
 
+  const busy = isRunning || step === 'legit' || step === 'attack';
+
+  const phases = [
+    {
+      key: 'legit' as const,
+      icon: ShieldCheck,
+      title: 'Legit payment',
+      amount: '300 cents ($3.00) to openai',
+      body: 'Within the cap and on the allowlist. A real Noir proof is generated, then verified by bb before the release step runs.',
+    },
+    {
+      key: 'attack' as const,
+      icon: ShieldAlert,
+      title: 'Injection attack',
+      amount: '50,000 cents ($500.00) to openai',
+      body: 'An injected prompt tries to drain $500. Rule R2 asserts amount <= max_per_tx, so witness generation fails and no proof exists.',
+    },
+  ];
+
+  const phaseState = (key: 'legit' | 'attack') => {
+    if (step === key) return 'running';
+    if (step === 'complete' || (key === 'legit' && step === 'attack')) return 'done';
+    return 'idle';
+  };
+
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-emerald-500/30 bg-gradient-to-r from-emerald-950/30 via-slate-900/60 to-purple-950/20 p-6 glass-panel shadow-[0_0_40px_rgba(16,185,129,0.15)]">
-      {/* Decorative neon accent */}
-      <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-400 via-cyan-400 to-purple-500" />
-
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-        {/* Left: Pitch & Description */}
-        <div className="space-y-1.5 max-w-xl">
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-              <Zap className="w-3.5 h-3.5 text-emerald-400" />
-              10-Second Demo Moment
-            </span>
-            <span className="text-xs text-gray-400 font-mono flex items-center gap-1">
-              <Timer className="w-3.5 h-3.5" />
-              {elapsedMs > 0 ? `${(elapsedMs / 1000).toFixed(2)}s` : 'Real-time'}
-            </span>
-          </div>
-
-          <h2 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight">
-            See Zero-Knowledge Agent Protection in Action
-          </h2>
-          <p className="text-sm text-gray-300 leading-relaxed">
-            Watch a legitimate agent payment get verified via real Noir UltraHonk
-            proof in milliseconds, followed immediately by an injection attack
-            blocked dead in its tracks by circuit mathematics.
-          </p>
-        </div>
-
-        {/* Right: 1-Click Launch Button */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 shrink-0">
-          <button
-            type="button"
-            onClick={execute10SecondDemo}
-            disabled={isRunning || step === 'legit' || step === 'attack'}
-            className="group relative inline-flex items-center justify-center gap-2.5 px-6 py-3.5 rounded-xl text-sm font-bold text-black bg-gradient-to-r from-emerald-400 to-emerald-300 hover:from-emerald-300 hover:to-emerald-200 active:scale-[0.98] transition-all shadow-[0_0_25px_rgba(5,242,146,0.6)] disabled:opacity-60 cursor-pointer"
-          >
-            <Play className="w-4 h-4 fill-black transition-transform group-hover:scale-110" />
-            <span>
-              {step === 'legit'
-                ? 'Verifying Legit Proof...'
-                : step === 'attack'
-                ? 'Blocking Attack In Circuit...'
-                : step === 'complete'
-                ? 'Re-Run 10-Second Demo'
-                : 'Run 10-Second Demo Moment'}
-            </span>
-          </button>
-        </div>
+    <div className="rounded-panel bg-cobalt-800 p-5 sm:p-7 ring-1 ring-inset ring-cobalt-line h-full flex flex-col">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="inline-flex items-center h-7 px-3 rounded-full bg-sun text-sun-ink text-[13px] font-medium">
+          10-second demo
+        </span>
+        <span className="inline-flex items-center gap-1.5 h-7 px-3 rounded-full bg-cobalt-700 text-white/75 text-[13px] mono">
+          <Timer className="w-3.5 h-3.5" aria-hidden="true" />
+          {elapsedMs > 0 ? `${(elapsedMs / 1000).toFixed(2)}s` : 'not run yet'}
+        </span>
       </div>
 
-      {/* Progress Cards */}
-      <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-white/10">
-        {/* Phase 1: Legitimate Payment */}
-        <div
-          className={`rounded-xl p-4 border transition-all ${
-            step === 'legit'
-              ? 'bg-emerald-500/10 border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.3)]'
-              : step === 'complete'
-              ? 'bg-emerald-950/20 border-emerald-500/40'
-              : 'bg-white/[0.02] border-white/10 opacity-70'
-          }`}
-        >
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              <span className="text-xs font-bold uppercase tracking-wider text-emerald-300">
-                Phase 1: Legit Payment ($3.00)
-              </span>
-            </div>
-            {step === 'complete' && (
-              <span className="inline-flex items-center gap-1 text-[11px] font-mono text-emerald-400">
-                <CheckCircle2 className="w-3.5 h-3.5" /> Verified
-              </span>
-            )}
-          </div>
-          <p className="text-xs text-gray-300">
-            Agent pays OpenAI for API inference. Noir proof generated and verified;
-            ZK indicator pulses green. PayPal order captured.
-          </p>
-        </div>
+      <h2 className="mt-4 text-[28px] sm:text-[34px] leading-[1.05] font-medium tracking-tightest">
+        One honest payment, one attack
+      </h2>
+      <p className="mt-3 text-[15px] leading-relaxed text-white/70 max-w-[52ch]">
+        Runs both through the real prover and verifier, one after the other. The proof panel and the audit log
+        show what actually happened.
+      </p>
 
-        {/* Phase 2: Prompt Injection Attack */}
-        <div
-          className={`rounded-xl p-4 border transition-all ${
-            step === 'attack'
-              ? 'bg-red-500/10 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)]'
-              : step === 'complete'
-              ? 'bg-red-950/20 border-red-500/40'
-              : 'bg-white/[0.02] border-white/10 opacity-70'
-          }`}
+      <ol className="mt-5 grid gap-3">
+        {phases.map((p, i) => {
+          const st = phaseState(p.key);
+          const Icon = p.icon;
+          return (
+            <li
+              key={p.key}
+              className={`rounded-2xl p-4 transition-colors ${
+                st === 'running' ? 'bg-cobalt-600' : st === 'done' ? 'bg-cobalt-700' : 'bg-cobalt-700/60'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="grid place-items-center w-7 h-7 shrink-0 rounded-full bg-cobalt-900 mono text-[12px] text-sun">
+                    {i + 1}
+                  </span>
+                  <Icon className="w-4 h-4 shrink-0 text-white/80" aria-hidden="true" />
+                  <span className="font-medium tracking-tighter2">{p.title}</span>
+                </div>
+                <span className="text-[12px] text-white/70 shrink-0">
+                  {st === 'running' ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      <Loader2 className="w-3.5 h-3.5 motion-safe:animate-spin" aria-hidden="true" /> Running
+                    </span>
+                  ) : st === 'done' ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      <Check className="w-3.5 h-3.5" aria-hidden="true" /> Ran
+                    </span>
+                  ) : (
+                    'Waiting'
+                  )}
+                </span>
+              </div>
+              <div className="mt-2 mono text-[12.5px] text-sun">{p.amount}</div>
+              <p className="mt-1.5 text-[13.5px] leading-relaxed text-white/65">{p.body}</p>
+            </li>
+          );
+        })}
+      </ol>
+
+      <div className="mt-auto pt-5">
+        <button
+          type="button"
+          onClick={execute10SecondDemo}
+          disabled={busy}
+          className="btn btn-accent w-full sm:w-auto"
+          aria-live="polite"
         >
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2">
-              <ShieldAlert className="w-4 h-4 text-red-400" />
-              <span className="text-xs font-bold uppercase tracking-wider text-red-300">
-                Phase 2: Injection Attack ($500.00)
-              </span>
-            </div>
-            {step === 'complete' && (
-              <span className="inline-flex items-center gap-1 text-[11px] font-mono text-red-400">
-                <XCircle className="w-3.5 h-3.5" /> Blocked
-              </span>
-            )}
-          </div>
-          <p className="text-xs text-gray-300">
-            Attacker prompt overrides instructions to drain $500.00. Rule R2
-            asserts <code>amount &lt;= max_per_tx</code> and fails witness generation.
-            Zero funds lost.
-          </p>
-        </div>
+          {busy ? (
+            <Loader2 className="motion-safe:animate-spin" aria-hidden="true" />
+          ) : (
+            <Play aria-hidden="true" />
+          )}
+          <span>
+            {step === 'legit'
+              ? 'Proving the legit payment…'
+              : step === 'attack'
+              ? 'Trying the attack…'
+              : step === 'complete'
+              ? 'Run the demo again'
+              : 'Run the 10-second demo'}
+          </span>
+        </button>
       </div>
     </div>
   );

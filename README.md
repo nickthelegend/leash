@@ -1,4 +1,4 @@
-# LEASH
+# LEASH — a ZK spending leash for AI agents
 
 Zero-knowledge spending mandates for AI agents. An agent can only pay inside a secret policy
 (a merchant allowlist and a per-transaction cap), even when it is prompt-injected. Every payment

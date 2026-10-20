@@ -1,7 +1,7 @@
 import type { Config } from 'tailwindcss';
 
+// LEASH theme: deep cobalt + sky-yellow, Sora for type, JetBrains Mono for hashes and proof bytes.
 const config: Config = {
-  darkMode: 'class',
   content: [
     './pages/**/*.{js,ts,jsx,tsx,mdx}',
     './components/**/*.{js,ts,jsx,tsx,mdx}',
@@ -10,35 +10,35 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        background: '#090A0F',
-        card: '#0F111A',
-        'card-border': '#1F2433',
-        leash: {
-          green: '#10B981',
-          'green-glow': '#05F292',
-          emerald: '#34D399',
-          crimson: '#EF4444',
-          cyan: '#06B6D4',
-          purple: '#8B5CF6',
+        cobalt: {
+          950: '#06112f',
+          900: '#0a1a4a', // deep: hero, dark sections, app frame
+          800: '#10235e', // panels on the frame
+          700: '#172d6f', // raised panels / inputs
+          600: '#22398a',
+          line: 'rgba(255,255,255,0.09)',
         },
-      },
-      animation: {
-        'pulse-fast': 'pulse 1.2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-        'ping-slow': 'ping 2s cubic-bezier(0, 0, 0.2, 1) infinite',
-        'spin-slow': 'spin 8s linear infinite',
-        'zk-verified': 'zkGlow 1.8s ease-in-out infinite',
-      },
-      keyframes: {
-        zkGlow: {
-          '0%, 100%': {
-            boxShadow: '0 0 15px rgba(16, 185, 129, 0.4), 0 0 30px rgba(5, 242, 146, 0.2)',
-            borderColor: 'rgba(16, 185, 129, 0.8)',
-          },
-          '50%': {
-            boxShadow: '0 0 35px rgba(16, 185, 129, 0.8), 0 0 70px rgba(5, 242, 146, 0.4)',
-            borderColor: 'rgba(5, 242, 146, 1)',
-          },
+        sun: {
+          DEFAULT: '#ffd84d', // accent: CTA, console page background
+          ink: '#1a1400',
+          soft: 'rgba(255,216,77,0.14)',
         },
+        cream: '#fff6d6', // pastel tint
+        mist: '#e8edff', // second tint
+        ok: { DEFAULT: '#6fe3b4', soft: 'rgba(111,227,180,0.13)' },
+        no: { DEFAULT: '#ff9a9a', soft: 'rgba(255,120,120,0.13)' },
+      },
+      fontFamily: {
+        sans: ['var(--font-sora)', 'system-ui', 'sans-serif'],
+        mono: ['var(--font-mono)', 'ui-monospace', 'monospace'],
+      },
+      letterSpacing: {
+        tightest: '-0.045em',
+        tighter2: '-0.035em',
+      },
+      borderRadius: {
+        frame: '36px',
+        panel: '24px',
       },
     },
   },

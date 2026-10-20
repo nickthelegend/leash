@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { DollarSign, Plus, Minus } from 'lucide-react';
+import { Plus, Minus } from 'lucide-react';
 
 interface SpendingLimitDialProps {
   valueCents: number; // in cents, e.g. 500 = $5.00
@@ -165,46 +165,55 @@ export function SpendingLimitDial({
 
   const presets = [200, 500, 1000, 2000]; // $2, $5, $10, $20
 
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (disabled) return;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      onChange(Math.min(maxCents, valueCents + stepCents));
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      onChange(Math.max(minCents, valueCents - stepCents));
+    }
+  };
+
   return (
     <div className="flex flex-col items-center select-none">
       {/* Dial Graphic */}
-      <div className="relative group cursor-grab active:cursor-grabbing touch-none">
+      <div className={`relative touch-none ${disabled ? 'opacity-60' : 'cursor-grab active:cursor-grabbing'}`}>
         <svg
           ref={svgRef}
           width={size}
           height={size}
-          className="overflow-visible"
+          className="overflow-visible rounded-full"
           onMouseDown={onMouseDown}
           onTouchStart={onTouchStart}
+          onKeyDown={onKeyDown}
+          role="slider"
+          tabIndex={disabled ? -1 : 0}
+          aria-label={agentName ? `Per-transaction cap for ${agentName}` : 'Per-transaction cap'}
+          aria-valuemin={minCents}
+          aria-valuemax={maxCents}
+          aria-valuenow={valueCents}
+          aria-valuetext={`${valueCents} cents ($${(valueCents / 100).toFixed(2)}) per transaction`}
+          aria-disabled={disabled}
         >
-          <defs>
-            <linearGradient id="dialGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="#05F292" />
-              <stop offset="100%" stopColor="#10B981" />
-            </linearGradient>
-            <filter id="dialGlow" x="-20%" y="-20%" width="140%" height="140%">
-              <feDropShadow dx="0" dy="0" stdDeviation="4" floodColor="#10B981" floodOpacity="0.6" />
-            </filter>
-          </defs>
-
           {/* Background track */}
           <path
             d={backgroundArc}
             fill="none"
-            stroke="#1a2030"
+            stroke="#172d6f"
             strokeWidth={strokeWidth}
             strokeLinecap="round"
           />
 
-          {/* Active green track */}
+          {/* Active track */}
           {activeArc && (
             <path
               d={activeArc}
               fill="none"
-              stroke="url(#dialGradient)"
+              stroke="#ffd84d"
               strokeWidth={strokeWidth}
               strokeLinecap="round"
-              filter="url(#dialGlow)"
             />
           )}
 
@@ -214,41 +223,38 @@ export function SpendingLimitDial({
             cy={knobPos.y}
             r={10}
             fill="#ffffff"
-            stroke="#05F292"
-            strokeWidth={3}
-            className="transition-transform duration-75 filter drop-shadow(0 0 6px rgba(5,242,146,0.8))"
+            stroke="#ffd84d"
+            strokeWidth={4}
           />
         </svg>
 
         {/* Center Readout */}
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-          <span className="text-[10px] uppercase tracking-wider font-semibold text-emerald-400/80">
-            Rule R2 Cap
-          </span>
-          <div className="flex items-baseline font-mono font-bold text-white tracking-tight">
-            <span className="text-sm text-emerald-400 mr-0.5">$</span>
-            <span className="text-3xl">{(valueCents / 100).toFixed(2)}</span>
+          <span className="text-[12px] text-white/60">Rule R2 cap</span>
+          <div className="flex items-baseline font-medium tracking-tightest text-white">
+            <span className="text-[34px] leading-none">${Math.floor(valueCents / 100)}</span>
+            <span className="text-[34px] leading-none text-white/40">
+              .{String(valueCents % 100).padStart(2, '0')}
+            </span>
           </div>
-          <span className="text-[11px] text-gray-400 font-mono">
-            {valueCents} cents / tx
-          </span>
+          <span className="mt-1 mono text-[11.5px] text-white/55">{valueCents} cents / tx</span>
         </div>
       </div>
 
       {/* Quick Stepper Buttons */}
-      <div className="flex items-center gap-3 mt-1">
+      <div className="flex flex-wrap items-center justify-center gap-2 mt-1">
         <button
           type="button"
           onClick={() => onChange(Math.max(minCents, valueCents - stepCents))}
           disabled={disabled || valueCents <= minCents}
-          className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 active:bg-white/20 border border-white/10 text-gray-300 disabled:opacity-40 transition-colors"
-          title="Decrease cap by $0.50"
+          className="grid place-items-center w-9 h-9 rounded-full bg-cobalt-700 hover:bg-cobalt-600 text-white disabled:opacity-40 transition-colors"
+          aria-label="Decrease cap by $0.50"
         >
-          <Minus className="w-3.5 h-3.5" />
+          <Minus className="w-4 h-4" aria-hidden="true" />
         </button>
 
         {/* Preset chips */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5" role="group" aria-label="Cap presets">
           {presets.map((preset) => {
             const isSelected = valueCents === preset;
             return (
@@ -257,10 +263,11 @@ export function SpendingLimitDial({
                 type="button"
                 onClick={() => onChange(preset)}
                 disabled={disabled}
-                className={`px-2 py-0.5 rounded text-xs font-mono font-medium transition-all ${
+                aria-pressed={isSelected}
+                className={`h-9 px-3 rounded-full text-[13px] font-medium transition-colors disabled:opacity-50 ${
                   isSelected
-                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 shadow-[0_0_10px_rgba(16,185,129,0.3)]'
-                    : 'bg-white/5 text-gray-400 hover:text-white border border-white/5'
+                    ? 'bg-sun text-sun-ink'
+                    : 'bg-cobalt-700 text-white/75 hover:text-white hover:bg-cobalt-600'
                 }`}
               >
                 ${preset / 100}
@@ -273,10 +280,10 @@ export function SpendingLimitDial({
           type="button"
           onClick={() => onChange(Math.min(maxCents, valueCents + stepCents))}
           disabled={disabled || valueCents >= maxCents}
-          className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 active:bg-white/20 border border-white/10 text-gray-300 disabled:opacity-40 transition-colors"
-          title="Increase cap by $0.50"
+          className="grid place-items-center w-9 h-9 rounded-full bg-cobalt-700 hover:bg-cobalt-600 text-white disabled:opacity-40 transition-colors"
+          aria-label="Increase cap by $0.50"
         >
-          <Plus className="w-3.5 h-3.5" />
+          <Plus className="w-4 h-4" aria-hidden="true" />
         </button>
       </div>
     </div>
