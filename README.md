@@ -58,6 +58,27 @@ Environment (`.env.example`): `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPA
 `LEASH_RECIPIENT_ADDRESS`, and the optional EVM target `LEASH_RPC_URL`,
 `LEASH_PAYMENT_CONTRACT_ADDRESS`, `LEASH_PRIVATE_KEY`.
 
+## Local demo (Anvil)
+
+`scripts/demo-anvil.sh` starts a local Anvil chain, deploys `ZKTranscriptLib`, `HonkVerifier` and
+`LeashPayment`, registers the default policy commitment, and writes the MCP environment to
+`.demo/anvil.env` (gitignored). It sends from Anvil's unlocked dev account #0, so no private key is
+used. Point an MCP client at `packages/leash-mcp/dist/index.js` with that environment (and the
+pinned `.tools` on `PATH`); `leash_request_payment` then proves for the EVM verifier and
+`leash_execute_onchain` submits the proof to `LeashPayment.executePayment`.
+
+Recorded on 2026-10-20 with opencode driving OpenRouter `minimax/minimax-m3.1-flash:free` through
+leash-mcp, nothing mocked:
+
+| Agent attempt | Result |
+| --- | --- |
+| openai, 300 cents, nonce 3001, proven payee | **Released**: 300 wei to Anvil #1, one `PaymentReleased` event |
+| openai, 900 cents (over the $5.00 cap) | **Blocked** before proving: `Rule R2 Violation` |
+| nonce 3001 again | **Blocked** on chain: `Nonce already used` |
+| openai, 200 cents, proof bound to Anvil #1 but sent to Anvil #2 | **Blocked** on chain: verifier `SumcheckFailed`, Anvil #2 got 0 wei |
+
+Stop the chain with `kill "$(cat .demo/anvil.pid)"`.
+
 ## Sponsor technology: PayPal
 
 After a proof verifies, the gateway releases the payment with the PayPal Orders v2 API
@@ -70,7 +91,7 @@ isn't configured instead of faking an order.
 - **No PayPal sandbox release has run yet.** It needs Nick's PayPal sandbox credentials
   (`PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET`). Until one completes, the PayPal path is untested
   end to end.
-- The EVM contract path is optional and has only been exercised in Forge tests, not on a live chain.
+- The EVM contract path has run on a local Anvil chain (see "Local demo"), not on a public network. leash-mcp's on-chain tool sends from an unlocked node account, so it only suits dev nodes.
 - The gateway's nonce and audit store is local to one process.
 - The policy is fixed to a 16-leaf (depth-4) merchant allowlist and a single per-transaction cap.
 - Proving and verification depend on local `nargo` and `bb` binaries at the pinned versions.
