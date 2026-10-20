@@ -77,11 +77,11 @@ contract LeashPaymentTest {
 
     function test_real_proof_pays_from_contract_balance() public {
         payment.registerPolicy(policyCommitment);
-        (bool ok, ) = address(payment).call{value: amount}("");
-        require(ok, "funding failed");
+        payment.deposit{value: amount}(policyCommitment);
         uint256 before = merchant.balance;
         _pay(0, amount, nonce, merchant, _proof());
         require(merchant.balance == before + amount, "merchant not paid");
+        require(payment.policyBalance(policyCommitment) == 0, "policy balance not spent");
         require(address(payment).balance == 0, "contract balance not spent");
     }
 
@@ -122,7 +122,7 @@ contract LeashPaymentTest {
 
     function test_unfunded_payment_reverts_instead_of_fake_success() public {
         payment.registerPolicy(policyCommitment);
-        _expectRevert(0, amount, nonce, merchant, _proof(), "Insufficient contract balance");
+        _expectRevert(0, amount, nonce, merchant, _proof(), "Insufficient policy balance");
     }
 
     function test_value_mismatch_reverts() public {
@@ -131,6 +131,31 @@ contract LeashPaymentTest {
     }
 
     receive() external payable {}
+
+    // Funds deposited for another policy must not be spendable by a proof against ours.
+    function test_cannot_spend_another_policys_deposit() public {
+        bytes32 other = keccak256("victim policy");
+        payment.registerPolicy(other);
+        payment.deposit{value: amount}(other);
+        payment.registerPolicy(policyCommitment);
+        _expectRevert(0, amount, nonce, merchant, _proof(), "Insufficient policy balance");
+        require(payment.policyBalance(other) == amount, "victim deposit touched");
+    }
+
+    function test_policy_cannot_be_reregistered() public {
+        payment.registerPolicy(policyCommitment);
+        try payment.registerPolicy(policyCommitment) {
+            revert("re-registration accepted");
+        } catch Error(string memory r) {
+            require(keccak256(bytes(r)) == keccak256("Policy already registered"), r);
+        }
+        require(payment.policyOwner(policyCommitment) == address(this), "owner");
+    }
+
+    function test_plain_eth_transfer_rejected() public {
+        (bool ok, ) = address(payment).call{value: 1}("");
+        require(!ok, "unaccounted ETH accepted");
+    }
 
     // Another policy owner consuming the same nonce value must not block this policy's payment.
     function test_foreign_policy_cannot_burn_our_nonce() public {

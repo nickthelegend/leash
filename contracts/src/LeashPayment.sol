@@ -19,8 +19,14 @@ contract LeashPayment {
     // Nonces are scoped per policy: a global nonce set let anyone with their own policy
     // front-run a victim's payment using the victim's nonce and block it ("Nonce already used").
     mapping(bytes32 => mapping(bytes32 => bool)) public usedNonces;
+    // Escrow is per policy. registerPolicy is permissionless, so a single pooled balance could be
+    // drained by anyone who registers their own policy with a large cap and proves against it.
+    // A policy can only spend what was deposited for that policy.
+    mapping(bytes32 => uint256) public policyBalance;
+    mapping(bytes32 => address) public policyOwner;
 
     event PolicyRegistered(bytes32 indexed policyCommitment, address indexed owner);
+    event PolicyFunded(bytes32 indexed policyCommitment, address indexed from, uint256 amount);
     event PaymentReleased(
         bytes32 indexed policyCommitment,
         uint256 amount,
@@ -34,16 +40,23 @@ contract LeashPayment {
         verifier = IVerifier(_verifier);
     }
 
-    receive() external payable {}
-
     /**
      * @notice Register a policy commitment hash. Only the hash is stored on-chain.
      * @param policyCommitment Pedersen commitment of (merkle_root, max_per_tx, policy_salt)
      */
     function registerPolicy(bytes32 policyCommitment) external {
         require(policyCommitment != bytes32(0), "Invalid policy commitment");
+        require(!registeredPolicies[policyCommitment], "Policy already registered");
         registeredPolicies[policyCommitment] = true;
+        policyOwner[policyCommitment] = msg.sender;
         emit PolicyRegistered(policyCommitment, msg.sender);
+    }
+
+    /// @notice Deposit funds that only proofs against `policyCommitment` can release.
+    function deposit(bytes32 policyCommitment) external payable {
+        require(registeredPolicies[policyCommitment], "Policy not registered");
+        policyBalance[policyCommitment] += msg.value;
+        emit PolicyFunded(policyCommitment, msg.sender, msg.value);
     }
 
     /**
@@ -85,7 +98,8 @@ contract LeashPayment {
         if (msg.value > 0) {
             require(msg.value == amount, "msg.value must equal proven amount");
         } else {
-            require(address(this).balance >= amount, "Insufficient contract balance");
+            require(policyBalance[policyCommitment] >= amount, "Insufficient policy balance");
+            policyBalance[policyCommitment] -= amount;
         }
         (bool success, ) = recipient.call{value: amount}("");
         require(success, "Payment transfer failed");
