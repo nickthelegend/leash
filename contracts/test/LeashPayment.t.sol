@@ -55,7 +55,7 @@ contract LeashPaymentTest {
             // HonkVerifier rejects bad proofs with custom errors.
             require(bytes(expected).length == 0, "expected a string revert");
         }
-        require(!payment.usedNonces(n), "nonce consumed on failure");
+        require(!payment.usedNonces(policyCommitment, n), "nonce consumed on failure");
     }
 
     function test_policy_registration() public {
@@ -72,7 +72,7 @@ contract LeashPaymentTest {
         uint256 before = merchant.balance;
         _pay(amount, amount, nonce, merchant, _proof());
         require(merchant.balance == before + amount, "merchant not paid the proven amount");
-        require(payment.usedNonces(nonce), "nonce not consumed");
+        require(payment.usedNonces(policyCommitment, nonce), "nonce not consumed");
     }
 
     function test_real_proof_pays_from_contract_balance() public {
@@ -131,4 +131,15 @@ contract LeashPaymentTest {
     }
 
     receive() external payable {}
+
+    // Another policy owner consuming the same nonce value must not block this policy's payment.
+    function test_foreign_policy_cannot_burn_our_nonce() public {
+        bytes32 other = keccak256("attacker policy");
+        payment.registerPolicy(other);
+        payment.registerPolicy(policyCommitment);
+        require(!payment.usedNonces(other, nonce) && !payment.usedNonces(policyCommitment, nonce), "fresh");
+        _pay(amount, amount, nonce, merchant, _proof());
+        require(payment.usedNonces(policyCommitment, nonce), "ours consumed");
+        require(!payment.usedNonces(other, nonce), "nonce must be scoped per policy");
+    }
 }

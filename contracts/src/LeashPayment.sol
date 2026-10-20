@@ -16,7 +16,9 @@ contract LeashPayment {
     // Committed policies allowed to execute payments
     mapping(bytes32 => bool) public registeredPolicies;
     // Nonce replay protection
-    mapping(bytes32 => bool) public usedNonces;
+    // Nonces are scoped per policy: a global nonce set let anyone with their own policy
+    // front-run a victim's payment using the victim's nonce and block it ("Nonce already used").
+    mapping(bytes32 => mapping(bytes32 => bool)) public usedNonces;
 
     event PolicyRegistered(bytes32 indexed policyCommitment, address indexed owner);
     event PaymentReleased(
@@ -62,7 +64,7 @@ contract LeashPayment {
         bytes calldata proof
     ) external payable {
         require(registeredPolicies[policyCommitment], "Policy not registered");
-        require(!usedNonces[nonce], "Nonce already used");
+        require(!usedNonces[policyCommitment][nonce], "Nonce already used");
         require(recipient != address(0), "Invalid recipient");
 
         // Format public inputs matching the Noir circuit ABI. The payee address fills the
@@ -77,7 +79,7 @@ contract LeashPayment {
         bool verified = verifier.verify(proof, publicInputs);
         require(verified, "Invalid ZK proof");
 
-        usedNonces[nonce] = true;
+        usedNonces[policyCommitment][nonce] = true;
 
         // Release exactly the proven amount. Never emit PaymentReleased without moving funds.
         if (msg.value > 0) {
