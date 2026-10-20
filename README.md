@@ -131,4 +131,21 @@ isn't configured instead of faking an order.
 - The gateway's nonce and audit store is local to one process.
 - The policy is fixed to a 16-leaf (depth-4) merchant allowlist and a single per-transaction cap.
 - Proving and verification depend on local `nargo` and `bb` binaries at the pinned versions.
-- No demo video yet.
+- The demo video is recorded (local Anvil, see below) but not hosted yet; the link goes here once it is.
+
+## Demo video
+
+An 89-second live recording (`leash-demo-v3.mp4`, shared separately until it is hosted) of
+`scripts/demo-anvil.sh` plus a real LLM agent (opencode + OpenRouter `minimax-m3.1-flash:free`) whose
+only tools are leash-mcp's. On a local Anvil chain, policy owned by Anvil #0:
+
+| Step | Result |
+|---|---|
+| 300 cents (`amountCents: 300`) to the payee `0x7099…79C8` | proved, verified, **released** on-chain (`executePayment(owner, commitment, …)`) |
+| injected 900-cent request | refused by the policy (rule R2, cap $5.00); no proof issued |
+| replay of the 300-cent proof | `Nonce already used` on-chain |
+| 200-cent proof sent to another recipient | `SumcheckFailed`: the verifier rejects the proof for those public inputs |
+| direct 900-cent call reusing the 200-cent proof, bypassing leash-mcp | `SumcheckFailed` |
+
+Captions mark what is a caption; all other text is unedited program output, and the JSON lines are
+leash-mcp's own `LEASH_MCP_LOG` entries (proof bytes shown as a length only).
