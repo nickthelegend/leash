@@ -66,7 +66,7 @@ function executeOnchain(nonce: string, recipientOverride?: string): ToolResult {
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1 << 24 }
     );
     const receipt = JSON.parse(out);
-    return ok({ released: receipt.status === '0x1', txHash: receipt.transactionHash, block: Number(receipt.blockNumber), recipient, amountWei: stored.amount });
+    return ok({ released: receipt.status === '0x1', txHash: receipt.transactionHash, block: Number(receipt.blockNumber), recipient, amountCents: stored.amount, amountWei: stored.amount });
   } catch (err) {
     // cast --json reports errors as JSON on stdout (cast 1.x), older versions on stderr.
     const e = err as { stderr?: string; stdout?: string };
@@ -184,6 +184,9 @@ export async function callTool(
         }
         return ok({
           approved: verification.valid,
+          // publicInputs.amount is the proven amount in cents (300 = $3.00), not dollars.
+          amountCents,
+          units: { amount: 'cents', onchain: '1 cent settles as 1 wei on the demo chain' },
           publicInputs: proof.publicInputs,
           proveMs: proof.durationMs,
           verification,
