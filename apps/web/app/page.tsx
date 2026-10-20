@@ -252,8 +252,10 @@ export default function Home() {
       }
     } catch (err: any) {
       setZkStatus('rejected');
+      const message = String(err?.message ?? err);
       setZkProofData({
-        rejectionReason: `Execution error: ${err.message}`,
+        setupError: /not configured/i.test(message),
+        rejectionReason: message,
       });
     } finally {
       setIsLoading(false);

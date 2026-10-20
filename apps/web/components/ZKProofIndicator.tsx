@@ -163,7 +163,7 @@ export function ZKProofIndicator({
             ? 'UltraHonk Proof Verified for Real'
             : isRejected
             ? proofData?.setupError
-              ? 'Setup Required: Prover Not Configured'
+              ? 'Setup Required: Not Configured'
               : 'Payment Blocked: Circuit Constraint Failed'
             : isProving
             ? 'Generating Zero-Knowledge Witness...'
