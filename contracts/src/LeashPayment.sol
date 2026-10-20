@@ -34,6 +34,7 @@ contract LeashPayment {
         bytes32 indexed nonce,
         address recipient
     );
+    event PolicyWithdrawn(bytes32 indexed policyCommitment, address indexed owner, address indexed to, uint256 amount);
 
     constructor(address _verifier) {
         require(_verifier != address(0), "Invalid verifier address");
@@ -105,5 +106,19 @@ contract LeashPayment {
         require(success, "Payment transfer failed");
 
         emit PaymentReleased(policyCommitment, amount, merchantIdHash, nonce, recipient);
+    }
+
+    /**
+     * @notice Lets the policy owner reclaim escrow deposited for their policy.
+     * Only the policy's own balance can be withdrawn; other policies' escrow is untouched.
+     */
+    function withdraw(bytes32 policyCommitment, uint256 amount, address payable to) external {
+        require(msg.sender == policyOwner[policyCommitment], "Not policy owner");
+        require(to != address(0), "Invalid recipient");
+        require(policyBalance[policyCommitment] >= amount, "Insufficient policy balance");
+        policyBalance[policyCommitment] -= amount; // effects before interaction
+        (bool success, ) = to.call{value: amount}("");
+        require(success, "Withdraw transfer failed");
+        emit PolicyWithdrawn(policyCommitment, msg.sender, to, amount);
     }
 }

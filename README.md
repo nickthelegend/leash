@@ -89,6 +89,18 @@ registers their own high-cap policy. A commitment can be registered only once.
 The script compiles the circuit and writes the EVM verification key (`circuits/target/vk_evm`) if
 they are missing. Stop the chain with `kill "$(cat .demo/anvil.pid)"`.
 
+## Security
+
+- **Per-policy escrow.** Funds released without `msg.value` come only from the escrow deposited for
+  that policy commitment (`deposit(bytes32)`). Registration is permissionless, so a shared pool would
+  let anyone register a high-cap policy and drain it; per-policy balances close that hole.
+- **Owner withdraw.** The address that registered a policy (`policyOwner`) can reclaim its unspent
+  escrow with `withdraw(bytes32 commitment, uint256 amount, address payable to)`. It reverts for
+  anyone else and for amounts above that policy's balance, never touches other policies' escrow,
+  updates the balance before transferring, and emits `PolicyWithdrawn`.
+- **Bound proofs.** The cap, merchant allowlist, nonce (scoped per policy) and recipient are all
+  public inputs of the ZK proof, so changing any of them fails on-chain verification.
+
 ## Sponsor technology: PayPal
 
 After a proof verifies, the gateway releases the payment with the PayPal Orders v2 API

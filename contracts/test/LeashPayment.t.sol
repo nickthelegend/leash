@@ -6,6 +6,7 @@ import "../src/LeashVerifier.sol";
 
 interface Vm {
     function readFileBinary(string calldata path) external view returns (bytes memory);
+    function prank(address) external;
 }
 
 // Every test runs against the bb-generated HonkVerifier with a real proof from circuits/.
