@@ -36,6 +36,7 @@ export async function POST(req: NextRequest) {
       expectedAmount,
       expectedMerchantHash,
       expectedNonce,
+      expectedRecipient,
       useEvmTarget,
     } = body;
 
@@ -57,6 +58,7 @@ export async function POST(req: NextRequest) {
       expectedAmount,
       expectedMerchantHash,
       expectedNonce,
+      expectedRecipient,
       useEvmTarget: Boolean(useEvmTarget),
     });
 

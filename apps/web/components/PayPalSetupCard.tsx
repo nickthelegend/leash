@@ -55,20 +55,22 @@ export function PayPalSetupCard({ orderId, orderStatus, className = '' }: PayPal
       <div className="flex flex-wrap items-center justify-between gap-3">
         <span className="text-lg font-medium tracking-tighter2">PayPal sandbox</span>
         <span className="inline-flex items-center gap-1.5 h-7 px-3 rounded-full bg-sun text-sun-ink text-[13px] font-medium">
-          <KeyRound className="w-3.5 h-3.5" aria-hidden="true" /> Setup required
+          <KeyRound className="w-3.5 h-3.5" aria-hidden="true" /> Setup required (PAYPAL_CLIENT_ID)
         </span>
       </div>
       <p className="mt-3 text-sm leading-relaxed text-white/75">
-        <span className="font-medium text-white">BLOCKED.</span> No PayPal sandbox order has run yet. The
-        release step needs sandbox credentials:
+        <span className="font-medium text-white">BLOCKED.</span> Orders v2 create + capture is implemented; the
+        live sandbox run is pending credentials:
       </p>
       <div className="mt-3 flex flex-wrap gap-2">
         <code className="mono rounded-full bg-cobalt-700 px-3 py-1.5 text-[12.5px] text-sun">PAYPAL_CLIENT_ID</code>
         <code className="mono rounded-full bg-cobalt-700 px-3 py-1.5 text-[12.5px] text-sun">PAYPAL_CLIENT_SECRET</code>
+        <code className="mono rounded-full bg-cobalt-700 px-3 py-1.5 text-[12.5px] text-sun">PAYPAL_PAYEE_MERCHANT_ID</code>
       </div>
       <p className="mt-3 text-[13px] leading-relaxed text-white/60">
-        Until they are set, proofs still verify, but the gateway reports the release as not configured and
-        logs the payment as NOT PAID. It never fakes an order.
+        Until they are set, proofs still verify, but the gateway answers &ldquo;Setup required&rdquo; and consumes
+        nothing. With keys: above the owner&rsquo;s approval threshold the buyer approves the order; below it a
+        vaulted wallet is charged. Paid only when the capture is COMPLETED for the proven cents.
       </p>
     </div>
   );

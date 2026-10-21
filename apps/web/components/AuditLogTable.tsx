@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { CheckCircle2, XCircle, Clock, Shield, RefreshCw } from 'lucide-react';
+import { CheckCircle2, XCircle, Clock, Shield, RefreshCw, ExternalLink, Hourglass } from 'lucide-react';
 import { truncateHash } from '@/lib/utils';
 
 export interface AuditLogItem {
@@ -12,17 +12,53 @@ export interface AuditLogItem {
   merchantIdHash: string;
   nonce: string;
   proofVerified: boolean;
-  status: 'COMPLETED' | 'REJECTED' | 'FAILED';
+  status: 'COMPLETED' | 'REJECTED' | 'FAILED' | 'AWAITING_APPROVAL';
   rejectionReason?: string;
   paypalOrderId?: string;
   paypalStatus?: string;
+  /** Set on gateway receipts (policyId = keccak(owner, commitment)). */
+  policyId?: string;
+  /** Buyer approval link while a PayPal order is above the owner's approval threshold. */
+  approveUrl?: string;
   durationMs: number;
 }
 
 interface AuditLogTableProps {
   logs: AuditLogItem[];
   onRefresh?: () => void;
+  onCapture?: (policyId: string, nonce: string) => Promise<void>;
   isLoading?: boolean;
+}
+
+function ApprovalActions({ log, onCapture }: { log: AuditLogItem; onCapture?: AuditLogTableProps['onCapture'] }) {
+  const [busy, setBusy] = React.useState(false);
+  if (log.status !== 'AWAITING_APPROVAL' || !log.policyId) return null;
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      {log.approveUrl && (
+        <a href={log.approveUrl} target="_blank" rel="noopener noreferrer" className="btn btn-accent btn-sm">
+          <ExternalLink aria-hidden="true" /> <span>Approve in PayPal</span>
+        </a>
+      )}
+      {onCapture && (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              await onCapture(log.policyId!, log.nonce);
+            } finally {
+              setBusy(false);
+            }
+          }}
+          className="btn btn-ghost-light btn-sm"
+        >
+          <span>{busy ? 'Capturing…' : 'Capture after approval'}</span>
+        </button>
+      )}
+    </div>
+  );
 }
 
 function StatusPill({ log }: { log: AuditLogItem }) {
@@ -30,6 +66,13 @@ function StatusPill({ log }: { log: AuditLogItem }) {
     return (
       <span className="inline-flex items-center gap-1.5 h-7 px-3 rounded-full text-[12px] font-medium bg-ok-soft text-ok whitespace-nowrap">
         <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" /> Paid
+      </span>
+    );
+  }
+  if (log.status === 'AWAITING_APPROVAL') {
+    return (
+      <span className="inline-flex items-center gap-1.5 h-7 px-3 rounded-full text-[12px] font-medium bg-sun-soft text-sun whitespace-nowrap">
+        <Hourglass className="w-3.5 h-3.5" aria-hidden="true" /> Awaiting approval
       </span>
     );
   }
@@ -56,7 +99,7 @@ function StatusPill({ log }: { log: AuditLogItem }) {
 function releaseText(log: AuditLogItem): string {
   if (log.paypalOrderId) return log.paypalOrderId;
   if (log.status === 'FAILED') {
-    return /not configured/i.test(log.rejectionReason || '') ? 'PayPal: setup required' : 'PayPal: not completed';
+    return /setup required|not configured/i.test(log.rejectionReason || '') ? 'PayPal: setup required' : 'PayPal: not completed';
   }
   return '—';
 }
@@ -64,6 +107,7 @@ function releaseText(log: AuditLogItem): string {
 export function AuditLogTable({
   logs,
   onRefresh,
+  onCapture,
   isLoading = false,
 }: AuditLogTableProps) {
   return (
@@ -74,7 +118,8 @@ export function AuditLogTable({
             Settlement and audit log
           </h2>
           <p className="mt-2 text-[14px] text-white/65 max-w-[62ch]">
-            The gateway records commitments, hashes and nonces only. The private rules never appear here.
+            Receipts from the gateway: policy id, salted merchant hash, nonce, proof hash and PayPal ids. The
+            private rules never appear here.
           </p>
         </div>
 
@@ -113,7 +158,7 @@ export function AuditLogTable({
                   <span className="text-[22px] font-medium tracking-tighter2">
                     {log.amountCents} <span className="text-[13px] text-white/55">cents</span>
                   </span>
-                  <span className="mono text-[12px] text-white/55">{log.durationMs}ms</span>
+                  <span className="mono text-[12px] text-white/55">{log.durationMs ? `${log.durationMs}ms` : ''}</span>
                 </div>
                 <dl className="mt-2 grid gap-1 text-[12.5px]">
                   <div className="flex justify-between gap-3">
@@ -121,7 +166,7 @@ export function AuditLogTable({
                     <dd className="mono break-all text-right">{log.nonce}</dd>
                   </div>
                   <div className="flex justify-between gap-3">
-                    <dt className="text-white/50">Commitment</dt>
+                    <dt className="text-white/50">Policy</dt>
                     <dd className="mono text-sun" title={log.policyCommitment}>
                       {truncateHash(log.policyCommitment, 6, 4) || '—'}
                     </dd>
@@ -134,6 +179,7 @@ export function AuditLogTable({
                 {log.rejectionReason && (
                   <p className="mt-2 text-[12px] text-white/55 break-words">{log.rejectionReason}</p>
                 )}
+                <ApprovalActions log={log} onCapture={onCapture} />
               </li>
             ))}
           </ul>
@@ -147,7 +193,7 @@ export function AuditLogTable({
                   <th scope="col" className="py-3 px-4 font-normal">Time</th>
                   <th scope="col" className="py-3 px-4 font-normal">Nonce</th>
                   <th scope="col" className="py-3 px-4 font-normal">Amount (cents)</th>
-                  <th scope="col" className="py-3 px-4 font-normal">Policy commitment</th>
+                  <th scope="col" className="py-3 px-4 font-normal">Policy</th>
                   <th scope="col" className="py-3 px-4 font-normal">Merchant hash</th>
                   <th scope="col" className="py-3 px-4 font-normal">Release</th>
                   <th scope="col" className="py-3 pl-4 pr-7 font-normal text-right">Latency</th>
@@ -156,8 +202,9 @@ export function AuditLogTable({
               <tbody className="divide-y divide-white/[0.07]">
                 {logs.map((log) => (
                   <tr key={log.id} className="hover:bg-white/[0.03] transition-colors">
-                    <td className="py-3.5 pl-7 pr-4">
+                    <td className="py-3.5 pl-7 pr-4 align-top">
                       <StatusPill log={log} />
+                      <ApprovalActions log={log} onCapture={onCapture} />
                     </td>
                     <td className="py-3.5 px-4 text-white/60 whitespace-nowrap">
                       {new Date(log.timestamp).toLocaleTimeString()}
@@ -176,7 +223,9 @@ export function AuditLogTable({
                     <td className="py-3.5 px-4 mono text-[12px] text-white/70" title={log.rejectionReason || log.paypalStatus}>
                       {releaseText(log)}
                     </td>
-                    <td className="py-3.5 pl-4 pr-7 mono text-[12px] text-white/60 text-right">{log.durationMs}ms</td>
+                    <td className="py-3.5 pl-4 pr-7 mono text-[12px] text-white/60 text-right">
+                      {log.durationMs ? `${log.durationMs}ms` : '—'}
+                    </td>
                   </tr>
                 ))}
               </tbody>

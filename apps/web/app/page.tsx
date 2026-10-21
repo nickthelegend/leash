@@ -46,19 +46,39 @@ export default function Home() {
   const [zkStatus, setZkStatus] = useState<ZKStatus>('idle');
   const [zkProofData, setZkProofData] = useState<ZKProofData | null>(null);
   const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
-  const [logs, setLogs] = useState<AuditLogItem[]>([]);
+  // Receipts come from the gateway (persisted); refusals and setup stops are this session's only.
+  const [receiptLogs, setReceiptLogs] = useState<AuditLogItem[]>([]);
+  const [localLogs, setLocalLogs] = useState<AuditLogItem[]>([]);
+  const logs = [...localLogs, ...receiptLogs].sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
+  const setLogs = (f: (prev: AuditLogItem[]) => AuditLogItem[]) => setLocalLogs(f);
   const [isLoading, setIsLoading] = useState(false);
   const [nonceCounter, setNonceCounter] = useState(1001);
+  const [owner, setOwner] = useState<string | null>(null);
+  const [captureError, setCaptureError] = useState<string | null>(null);
 
-  // Fetch initial audit logs
   const fetchLogs = useCallback(async () => {
     try {
-      const res = await fetch('/api/logs');
+      const res = await fetch('/api/receipts');
       if (res.ok) {
         const data = await res.json();
-        if (data.logs) {
-          setLogs(data.logs);
-        }
+        setReceiptLogs(
+          (data.receipts ?? []).map((r: any) => ({
+            id: `${r.policyId}:${r.nonce}`,
+            timestamp: r.ts,
+            policyCommitment: r.policyId,
+            policyId: r.policyId,
+            amountCents: r.amountCents,
+            merchantIdHash: r.merchantIdHash,
+            nonce: r.nonce,
+            proofVerified: true,
+            status: r.status,
+            rejectionReason: r.error,
+            paypalOrderId: r.paypalOrderId,
+            paypalStatus: r.captureId ? `capture ${r.captureId}` : r.status,
+            approveUrl: r.approveUrl,
+            durationMs: 0,
+          }))
+        );
       }
     } catch {
       // ignore
@@ -67,7 +87,36 @@ export default function Home() {
 
   useEffect(() => {
     fetchLogs();
+    fetch('/api/policies')
+      .then((r) => r.json())
+      .then((d) => setOwner(d.owner ?? null))
+      .catch(() => setOwner(null));
   }, [fetchLogs]);
+
+  const capture = useCallback(
+    async (policyId: string, nonce: string) => {
+      setCaptureError(null);
+      const res = await fetch('/api/pay/capture', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ policyId, nonce }),
+      });
+      const data = await res.json();
+      if (!data.success) setCaptureError(data.error || `Capture failed (HTTP ${res.status})`);
+      await fetchLogs();
+    },
+    [fetchLogs]
+  );
+
+  // Owner-device record of today's spend chain per agent policy (prev commitment + total that opens it).
+  const spendRef = React.useRef<Record<string, { epoch: number; spentCents: number; commit: string }>>({});
+  const spendFor = (agentId: string) => {
+    const epoch = Math.floor(Date.now() / 86_400_000);
+    const s = spendRef.current[agentId];
+    return s && s.epoch === epoch
+      ? { epoch, prevSpendCommit: s.commit, spentBeforeCents: s.spentCents }
+      : { epoch, prevSpendCommit: '0', spentBeforeCents: 0 };
+  };
 
   // Commit each agent's policy (cap + allowlist) server-side; the commitment is real Pedersen output.
   const policiesRef = React.useRef<Record<string, unknown>>({});
@@ -79,6 +128,8 @@ export default function Home() {
       body: JSON.stringify({
         name: agent.name,
         maxPerTxCents: agent.capCents,
+        dailyCapCents: agent.capCents * 3,
+        approvalThresholdCents: Math.min(300, agent.capCents),
         merchants: agent.allowlistedMerchants,
       }),
     });
@@ -110,6 +161,7 @@ export default function Home() {
         if (agent.id === agentId) {
           const next = { ...agent, capCents: newCapCents, commitmentHash: '' };
           delete policiesRef.current[agentId];
+          delete spendRef.current[agentId];
           commitPolicy(next).catch((e: Error) => setPolicyError(e.message));
           return next;
         }
@@ -136,9 +188,10 @@ export default function Home() {
     setNonceCounter((prev) => prev + 1);
 
     try {
-      const policy =
+      const policy: any =
         policiesRef.current[targetAgent.id] ?? (await commitPolicy(targetAgent));
-      // 1. Prover generates real UltraHonk proof
+      const spend = spendFor(targetAgent.id);
+      // 1. Owner-device prover: real UltraHonk proof (needs the policy secrets, never sent to the gateway)
       const proveRes = await fetch('/api/prove', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -147,6 +200,7 @@ export default function Home() {
           merchantName,
           amountCents,
           nonce,
+          spend,
         }),
       });
 
@@ -211,40 +265,48 @@ export default function Home() {
           verifiedAt: new Date().toLocaleTimeString(),
         });
 
-        // Trigger PayPal order release
+        // 2. Release through the verify-only gateway: it re-verifies, checks the spend chain and the
+        // PayPal payee, then creates the order (approve link above the threshold, vault capture below).
+        const leaf = policy.merchantLeaves?.find((m: any) => m.name === merchantName.trim().toLowerCase());
         const payRes = await fetch('/api/pay', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            policyCommitment: proveData.publicInputs.policy_commitment,
-            amountCents,
-            merchantIdHash: proveData.publicInputs.merchant_id_hash,
-            nonce,
+            owner,
             proofHex: proveData.proofHex,
             publicInputsHex: proveData.publicInputsHex,
-            merchantName,
+            paypalMerchantId: leaf?.paypalMerchantId,
           }),
         });
-
         const payData = await payRes.json();
-        if (!payData.success) {
-          throw new Error(payData.error || `Payment release failed (HTTP ${payRes.status})`);
-        }
 
-        const completedLog: AuditLogItem = {
-          id: `log_${Date.now()}`,
-          timestamp: new Date().toISOString(),
-          policyCommitment: proveData.publicInputs.policy_commitment,
-          amountCents,
-          merchantIdHash: proveData.publicInputs.merchant_id_hash,
-          nonce,
-          proofVerified: true,
-          status: 'COMPLETED',
-          paypalOrderId: payData.paypal?.orderId,
-          paypalStatus: payData.paypal?.status,
-          durationMs: Date.now() - startedAt,
-        };
-        setLogs((prev) => [completedLog, ...prev]);
+        if (payData.consumed) {
+          // The gateway accepted the spend update: advance this device's daily total.
+          spendRef.current[targetAgent.id] = {
+            epoch: spend.epoch,
+            spentCents: spend.spentBeforeCents + amountCents,
+            commit: proveData.publicInputs.new_spend_commit,
+          };
+          await fetchLogs();
+        } else {
+          // Nothing consumed (e.g. Setup required): record the stop for this session only.
+          setLogs((prev) => [
+            {
+              id: `log_${Date.now()}`,
+              timestamp: new Date().toISOString(),
+              policyCommitment: proveData.publicInputs.policy_commitment,
+              amountCents,
+              merchantIdHash: proveData.publicInputs.merchant_id_hash,
+              nonce,
+              proofVerified: true,
+              status: 'FAILED',
+              rejectionReason: payData.error || `Payment release failed (HTTP ${payRes.status})`,
+              durationMs: Date.now() - startedAt,
+            },
+            ...prev,
+          ]);
+          setZkProofData((prev) => ({ ...(prev ?? {}), releaseNote: payData.error || `HTTP ${payRes.status}` }));
+        }
       } else {
         setZkStatus('rejected');
         setZkProofData({
@@ -273,8 +335,9 @@ export default function Home() {
     await executePayment(agents[0].id, 'openai', 50000, 'Cap override injection');
   };
 
-  // Derived from the gateway audit log only; nothing here is invented.
+  // Derived from the gateway receipts only; nothing here is invented.
   const paidLogs = logs.filter((l) => l.status === 'COMPLETED');
+  const awaitingCount = logs.filter((l) => l.status === 'AWAITING_APPROVAL').length;
   const releasedCents = paidLogs.reduce((sum, l) => sum + (Number(l.amountCents) || 0), 0);
   const notPaidCount = logs.filter((l) => l.status === 'FAILED').length;
   const blockedCount = logs.filter((l) => l.status === 'REJECTED').length;
@@ -357,7 +420,9 @@ export default function Home() {
                 </div>
                 <div className="rounded-2xl bg-cobalt-700 p-3 sm:p-4">
                   <dt className="text-[12px] text-white/60">Verified, not paid</dt>
-                  <dd className="mt-1 text-[24px] sm:text-[28px] font-medium tracking-tighter2">{notPaidCount}</dd>
+                  <dd className="mt-1 text-[24px] sm:text-[28px] font-medium tracking-tighter2">
+                    {notPaidCount + awaitingCount}
+                  </dd>
                 </div>
                 <div className="rounded-2xl bg-cobalt-700 p-3 sm:p-4">
                   <dt className="text-[12px] text-white/60">Blocked</dt>
@@ -365,8 +430,8 @@ export default function Home() {
                 </div>
               </dl>
               <p className="mt-4 text-[12.5px] text-white/50">
-                Counted from the gateway&rsquo;s audit log. A verified proof only counts as paid once a PayPal order is
-                captured.
+                Counted from the gateway&rsquo;s receipts. A verified proof only counts as paid once PayPal reports the
+                capture COMPLETED for exactly the proven cents.
               </p>
             </div>
             <PayPalSetupCard orderId={latestOrder?.paypalOrderId} orderStatus={latestOrder?.paypalStatus} />
@@ -420,7 +485,12 @@ export default function Home() {
 
           {/* Settlement Audit Log */}
           <section id="audit" aria-label="Settlement audit log" className="mt-4 scroll-mt-6">
-            <AuditLogTable logs={logs} onRefresh={fetchLogs} isLoading={isLoading} />
+            {captureError && (
+              <div role="alert" className="mb-3 rounded-2xl bg-no-soft px-4 py-3 text-[14px] text-no break-words">
+                {captureError}
+              </div>
+            )}
+            <AuditLogTable logs={logs} onRefresh={fetchLogs} onCapture={capture} isLoading={isLoading} />
           </section>
         </div>
       </main>

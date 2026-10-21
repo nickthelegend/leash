@@ -15,8 +15,12 @@ export interface ZKProofData {
     amount: string;
     merchant_id_hash: string;
     nonce: string;
+    recipient?: string;
+    new_spend_commit?: string;
   };
   rejectionReason?: string;
+  /** Why the verified payment was not released (e.g. Setup required (PAYPAL_CLIENT_ID)). */
+  releaseNote?: string;
   setupError?: boolean;
   verifiedAt?: string;
 }
@@ -67,7 +71,7 @@ export function ZKProofIndicator({
     : isRejected
     ? proofData?.rejectionReason || 'The request was refused. No money moved.'
     : isProving
-    ? 'Solving the Pedersen commitment, allowlist path and per-transaction cap constraints.'
+    ? 'Solving the policy commitment, the (merchant, payee) allowlist path, the per-payment cap and the daily cap.'
     : 'Run the demo or pay from an agent card. The cap and the merchant stay hidden; only rule compliance is proven.';
 
   const iconWrap = isVerified
@@ -133,10 +137,23 @@ export function ZKProofIndicator({
               {truncateHash(proofData.extractedPublicInputs.merchant_id_hash, 6, 4)}
             </dd>
           </div>
+          {proofData.extractedPublicInputs.recipient && (
+            <div className="flex justify-between gap-3 rounded-2xl bg-cobalt-700 px-4 py-3">
+              <dt className="text-white/60">Bound payee</dt>
+              <dd className="mono text-[12.5px]" title={proofData.extractedPublicInputs.recipient}>
+                {truncateHash(proofData.extractedPublicInputs.recipient, 6, 4)}
+              </dd>
+            </div>
+          )}
           <div className="flex justify-between gap-3 rounded-2xl bg-cobalt-700 px-4 py-3">
             <dt className="text-white/60">Nonce</dt>
             <dd className="mono text-[12.5px] break-all text-right">{proofData.extractedPublicInputs.nonce}</dd>
           </div>
+          {proofData.releaseNote && (
+            <p role="status" className="rounded-2xl bg-sun-soft px-4 py-3 text-[13px] leading-relaxed text-white/85 break-words">
+              Not released: {proofData.releaseNote}
+            </p>
+          )}
           <div className="flex flex-wrap justify-between gap-2 px-1 pt-1 text-[12px] text-white/55">
             <span>bb verify: passed</span>
             <span>
