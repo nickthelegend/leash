@@ -4,7 +4,9 @@
  *   pnpm paypal:e2e                      human mode: prints the approve link, waits for Enter, captures
  *   pnpm paypal:e2e -- --vault <id>      agent mode: charges a vaulted wallet (Vault v3 payment token)
  * Needs PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET and PAYPAL_PAYEE_MERCHANT_ID (the sandbox business
- * account that receives the money). Without them it prints "Setup required (…)" and exits 1.
+ * account that receives the money), from .env.local at the repo root or the environment. Without them
+ * it prints "Setup required (…)", a numbered checklist of what to create in the PayPal Developer
+ * Dashboard, and exits 1.
  * Prints the policyId, nonce, custom_id, order id and capture id; never prints credentials.
  */
 import readline from 'readline';
@@ -13,7 +15,9 @@ import {
   currentEpoch,
   generatePaymentProof,
   leashCustomId,
+  missingPayPalE2eEnv,
   PayPalService,
+  paypalSandboxChecklist,
   policyIdOf,
   verifyPaymentProof,
 } from '../packages/core/src/index.js';
@@ -25,11 +29,14 @@ const vaultId = vaultIdx >= 0 ? process.argv[vaultIdx + 1] : undefined;
 
 async function main(): Promise<void> {
   const pp = new PayPalService();
-  const missing = [...pp.missing(), ...(process.env.PAYPAL_PAYEE_MERCHANT_ID ? [] : ['PAYPAL_PAYEE_MERCHANT_ID'])];
+  const missing = missingPayPalE2eEnv();
   if (missing.length) {
     console.error(`Setup required (${missing[0]})${missing.length > 1 ? ` — also missing: ${missing.slice(1).join(', ')}` : ''}`);
+    console.error('\nNo PayPal call was made. To run the live sandbox order, create these in the PayPal Developer Dashboard:\n');
+    for (const line of paypalSandboxChecklist(missing)) console.error(line);
     process.exit(1);
   }
+  if (pp.environment !== 'sandbox') throw new Error('paypal:e2e runs against the sandbox only (PAYPAL_ENVIRONMENT=sandbox)');
   const merchantId = process.env.PAYPAL_PAYEE_MERCHANT_ID!;
 
   const policy = createSpendingPolicy({

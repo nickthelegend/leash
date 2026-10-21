@@ -81,7 +81,13 @@ capture is `COMPLETED` for exactly the proven cents.
   `pnpm verify:receipt <nonce>` re-runs `bb verify` on the stored proof, checks every field and, with
   keys, fetches the PayPal order and compares `custom_id` and the captured amount.
 - `pnpm paypal:e2e`: proof -> create -> approve link (or `--vault <id>`) -> capture, printing the ids.
-  Without keys it prints `Setup required (PAYPAL_CLIENT_ID)` and exits 1.
+  Without keys it prints `Setup required (PAYPAL_CLIENT_ID)`, a numbered checklist of what to create
+  in the PayPal Developer Dashboard (sandbox business + personal accounts, a REST app, the Vault
+  feature for agent mode, which env vars), makes no PayPal call and exits 1.
+- Every field and header sent was re-checked against developer.paypal.com on 2026-10-21 (Orders v2
+  create/capture reference, Vault v3 setup-/payment-tokens reference); `paypal.test.ts` fails on any
+  undocumented key. That pass dropped `user_action: SETUP_NOW` from the PayPal-wallet setup token
+  (PayPal documents it for cards only).
 
 ## Proof-gated proxy for PayPal's agent toolkit
 

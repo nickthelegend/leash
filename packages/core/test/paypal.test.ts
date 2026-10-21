@@ -16,6 +16,7 @@ import {
   PayPalSetupRequired,
   valueToCents,
 } from '../src/paypal/paypal.js';
+import { missingPayPalE2eEnv, PAYPAL_E2E_REQUIRED, paypalSandboxChecklist } from '../src/paypal/setup.js';
 
 const OWNER = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';
 const COMMITMENT = '0x09133620fa909d1ae63144fe7b802a6746fe87be8b3ed165aed34d165383acff';
@@ -136,6 +137,98 @@ describe('capture assertion (pure, on response-shaped objects)', () => {
     expect(() => assertCaptureMatches(resp('COMPLETED', 'COMPLETED', '3.01'), { amountCents: 300 })).toThrow(/301 cents != proven 300/);
     expect(() => assertCaptureMatches(resp('COMPLETED', 'COMPLETED', '3.00', 'EUR'), { amountCents: 300 })).toThrow(/currency/);
     expect(() => assertCaptureMatches(resp('COMPLETED', 'COMPLETED', '3.00'), { amountCents: 300, customId: '0xbeef' })).toThrow(/custom_id/);
+  });
+});
+
+/**
+ * Every field LEASH sends, checked against developer.paypal.com on 2026-10-21:
+ * orders-create / orders-capture reference (purchase_unit_request, payment_source.paypal,
+ * experience_context) and the payment-tokens v3 setup-tokens-create reference plus the PayPal-wallet
+ * sample in the "purchase later" guide. A key outside these sets is a field PayPal does not document.
+ */
+const DOC = {
+  order: ['intent', 'purchase_units', 'payment_source'],
+  purchaseUnit: ['reference_id', 'custom_id', 'invoice_id', 'description', 'amount', 'payee'],
+  paypalSource: ['experience_context', 'vault_id'],
+  orderExperience: ['return_url', 'cancel_url', 'user_action', 'shipping_preference'],
+  userAction: ['CONTINUE', 'PAY_NOW'],
+  shipping: ['GET_FROM_FILE', 'NO_SHIPPING', 'SET_PROVIDED_ADDRESS'],
+  setupPaypal: ['description', 'usage_type', 'usage_pattern', 'customer_type', 'permit_multiple_payment_tokens', 'experience_context'],
+  setupExperience: ['return_url', 'cancel_url', 'shipping_preference', 'brand_name', 'locale', 'payment_method_preference'],
+};
+const keysWithin = (o: object, allowed: string[]) => expect(Object.keys(o).filter((k) => !allowed.includes(k))).toEqual([]);
+
+describe('PayPal fields match the documented schema', () => {
+  it('create-order bodies (human and vault) use only documented fields and limits', () => {
+    for (const mode of [
+      { kind: 'human' as const, returnUrl: 'https://example.com/r', cancelUrl: 'https://example.com/c' },
+      { kind: 'vault' as const, vaultId: 'jwgvx42' },
+    ]) {
+      const body: any = buildCreateOrderBody({ ...proven, nonce: '9'.repeat(30) }, mode);
+      keysWithin(body, DOC.order);
+      const pu = body.purchase_units[0];
+      keysWithin(pu, DOC.purchaseUnit);
+      expect(pu.reference_id.length).toBeLessThanOrEqual(256);
+      expect(pu.custom_id.length).toBeLessThanOrEqual(255);
+      expect(pu.invoice_id.length).toBeLessThanOrEqual(127);
+      expect(pu.description.length).toBeLessThanOrEqual(127);
+      expect(pu.payee.merchant_id).toMatch(/^[2-9A-HJ-NP-Z]{13}$/);
+      expect(pu.amount.currency_code).toMatch(/^[A-Z]{3}$/);
+      expect(pu.amount.value).toMatch(/^((-?[0-9]+)|(-?([0-9]+)?[.][0-9]+))$/);
+      keysWithin(body.payment_source.paypal, DOC.paypalSource);
+      const ec = body.payment_source.paypal.experience_context;
+      if (ec) {
+        keysWithin(ec, DOC.orderExperience);
+        expect(DOC.userAction).toContain(ec.user_action);
+        expect(DOC.shipping).toContain(ec.shipping_preference);
+      }
+    }
+  });
+
+  it('Prefer is a documented value and PayPal-Request-Id fits the Orders limit (1..10000)', () => {
+    const long = { ...proven, nonce: '9'.repeat(30) };
+    for (const h of [buildCreateOrderHeaders(long, 'T'), buildCaptureHeaders(long, 'T')]) {
+      expect(['return=minimal', 'return=representation']).toContain(h.Prefer);
+      expect(h['PayPal-Request-Id'].length).toBeGreaterThan(0);
+      expect(h['PayPal-Request-Id'].length).toBeLessThanOrEqual(10000);
+      expect(Object.keys(h).sort()).toEqual(['Authorization', 'Content-Type', 'PayPal-Request-Id', 'Prefer']);
+    }
+  });
+
+  it('Vault v3 setup-token body for a PayPal wallet uses only documented fields (no card-only user_action)', () => {
+    const s: any = buildSetupTokenBody({ returnUrl: 'https://example.com/r', cancelUrl: 'https://example.com/c' });
+    keysWithin(s, ['payment_source']);
+    keysWithin(s.payment_source, ['paypal']);
+    const pp = s.payment_source.paypal;
+    keysWithin(pp, DOC.setupPaypal);
+    keysWithin(pp.experience_context, DOC.setupExperience);
+    expect(pp.experience_context.user_action).toBeUndefined();
+    expect(['MERCHANT', 'PLATFORM']).toContain(pp.usage_type);
+    expect(['CONSUMER', 'BUSINESS']).toContain(pp.customer_type);
+    expect(pp.usage_pattern).toBe('IMMEDIATE');
+    expect(pp.description.length).toBeLessThanOrEqual(128);
+  });
+});
+
+describe('PayPal sandbox setup checklist (printed by pnpm paypal:e2e without keys)', () => {
+  it('reports missing variable names only, never values', () => {
+    expect(missingPayPalE2eEnv({})).toEqual([...PAYPAL_E2E_REQUIRED]);
+    expect(missingPayPalE2eEnv({ PAYPAL_CLIENT_ID: 'x', PAYPAL_CLIENT_SECRET: ' ', PAYPAL_PAYEE_MERCHANT_ID: 'ABCDEFGHJKLMN' })).toEqual([
+      'PAYPAL_CLIENT_SECRET',
+    ]);
+  });
+
+  it('is numbered and names every variable, the buyer account, the app and the Vault feature', () => {
+    const lines = paypalSandboxChecklist(['PAYPAL_CLIENT_ID']);
+    const numbered = lines.filter((l) => /^\d+\. /.test(l)).map((l) => Number(l.split('.')[0]));
+    expect(numbered).toEqual(numbered.map((_, i) => i + 1));
+    const text = lines.join('\n');
+    for (const v of [...PAYPAL_E2E_REQUIRED, 'PAYPAL_ENVIRONMENT=sandbox', 'PAYPAL_ACCESS_TOKEN']) expect(text).toContain(v);
+    expect(text).toMatch(/PAYPAL_CLIENT_ID\s+<- missing/);
+    expect(text).toMatch(/PAYPAL_CLIENT_SECRET\s+\(set\)/);
+    expect(text).toMatch(/Personal/);
+    expect(text).toMatch(/Create App/);
+    expect(text).toMatch(/Vault/);
   });
 });
 

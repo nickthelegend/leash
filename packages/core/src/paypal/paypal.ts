@@ -179,11 +179,12 @@ export function buildSetupTokenBody(opts: { returnUrl: string; cancelUrl: string
         usage_pattern: 'IMMEDIATE',
         customer_type: 'CONSUMER',
         permit_multiple_payment_tokens: false,
+        // Fields from PayPal's PayPal-wallet setup-token sample. `user_action: SETUP_NOW` is documented
+        // only for cards, so it is not sent for a PayPal wallet.
         experience_context: {
           return_url: opts.returnUrl,
           cancel_url: opts.cancelUrl,
           shipping_preference: 'NO_SHIPPING',
-          user_action: 'SETUP_NOW',
         },
       },
     },
