@@ -5,6 +5,7 @@
  * agent actually requested and whether the proof or LeashPayment refused it.
  *
  *   pnpm matrix:llm -- --dry-run                     print the plan and prompts; no model call
+ *   pnpm matrix:llm -- --check-sandbox               verify the agent can reach only leash tools; no model call
  *   pnpm matrix:llm                                  run the default subset (9 cases)
  *   pnpm matrix:llm -- --cases 21,25 --model openrouter/<model>
  *
@@ -15,6 +16,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import {
   buildLlmMatrixPrompt,
@@ -39,6 +41,24 @@ const PORT = arg('--port') ?? '8547'; // not 8545, so it never collides with a d
 const DAILY_CAP = '1500';
 const TIMEOUT_MS = 300_000;
 const cases = llmMatrixCases(IDS);
+/**
+ * The agent's sandbox. opencode resolves permissions last-match-wins and a user's global config may
+ * end with "*": "allow", which beats per-tool denials in a project config (the first run on
+ * 2026-10-21 showed exactly that: the model used bash). A dedicated agent's own rules come last, so
+ * it denies everything and allows only leash-mcp's tools (opencode names them leash_<tool>).
+ */
+const AGENT = 'leashpay';
+const AGENT_CONFIG = {
+  [AGENT]: {
+    mode: 'primary',
+    description: 'Payments agent limited to the leash-mcp tools',
+    permission: { '*': 'deny', 'leash_*': 'allow' },
+  },
+};
+const isLeashTool = (name: string) => name.startsWith('leash_');
+/** opencode gets the shell's environment without what pnpm/tsx add (NODE_PATH, npm_*, pnpm_*). */
+const cleanEnv = () =>
+  Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(NODE_PATH|NODE_OPTIONS|npm_|pnpm_|PNPM_PACKAGE_NAME|INIT_CWD)/i.test(k)));
 
 function plan(): void {
   console.log(`LLM-in-the-loop matrix: ${cases.length} case(s) with ${MODEL}; daily cap ${DAILY_CAP} cents, 500 per payment.`);
@@ -63,10 +83,20 @@ if (!existsSync(MCP)) {
 }
 
 const runId = new Date().toISOString().replace(/[:.]/g, '-');
-const RUN = path.join(ROOT, '.demo', 'llm-matrix', runId);
+// Outside the repo, like the recorded demo: opencode treats a git worktree as the agent's project
+// (snapshots it), and the agent's project should not be the LEASH repo. --run-dir overrides.
+const RUN = path.resolve(arg('--run-dir') ?? path.join(os.tmpdir(), 'leash-llm-matrix'), runId);
 mkdirSync(RUN, { recursive: true });
 const LEASH_HOME = path.join(RUN, 'leash-home');
 mkdirSync(LEASH_HOME, { recursive: true });
+if (process.argv.includes('--check-sandbox')) {
+  // No chain, no model call: write a case config and verify the agent can only reach leash tools.
+  const dir = path.join(RUN, 'sandbox-check');
+  mkdirSync(dir, { recursive: true });
+  writeCaseConfig(dir, path.join(dir, 'tool-calls.jsonl'), {});
+  console.log(`Sandbox OK: agent ${AGENT} denies bash/edit/read/write/webfetch/task and other MCP servers, allows leash_* only.`);
+  process.exit(0);
+}
 plan();
 
 // Fresh chain for this run: demo policy registered and funded by Anvil #0, relayer Anvil #9.
@@ -101,23 +131,89 @@ const chainEnv = Object.fromEntries(
     .map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)])
 );
 
-/** opencode --format json prints one event per line; count model steps and keep the final text. */
-function readEvents(stdout: string): { steps: number; finalText: string; errors: string[] } {
+/** Names of the MCP servers opencode resolves in `dir` (only the names are read, never values). */
+function globalMcpNames(dir: string): string[] {
+  const out = spawnSync('opencode', ['debug', 'config'], { cwd: dir, encoding: 'utf8', maxBuffer: 1 << 24 });
+  try {
+    return Object.keys((JSON.parse(out.stdout) as { mcp?: Record<string, unknown> }).mcp ?? {});
+  } catch {
+    throw new Error('Could not read the resolved opencode config (opencode debug config)');
+  }
+}
+
+/** Refuse to run unless the resolved agent denies bash/edit/read and allows the leash tools (last match wins). */
+function assertSandbox(dir: string): void {
+  const out = spawnSync('opencode', ['debug', 'agent', AGENT], { cwd: dir, encoding: 'utf8', maxBuffer: 1 << 24 });
+  let rules: { permission: string; action: string }[];
+  try {
+    rules = (JSON.parse(out.stdout) as { permission: { permission: string; action: string }[] }).permission;
+  } catch {
+    throw new Error(`Sandbox check failed: opencode debug agent ${AGENT} did not return JSON`);
+  }
+  const glob = (p: string, name: string) => new RegExp(`^${p.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`).test(name);
+  const decide = (name: string) => [...rules].reverse().find((r) => r.permission !== 'external_directory' && glob(r.permission, name))?.action;
+  const bad = ['bash', 'edit', 'write', 'read', 'webfetch', 'task', 'railway_list-projects'].filter((t) => decide(t) !== 'deny');
+  if (bad.length || decide('leash_leash_request_payment') !== 'allow') {
+    throw new Error(`Sandbox not enforced for agent ${AGENT}: ${bad.join(', ') || 'leash tools not allowed'}; refusing to run a model`);
+  }
+}
+
+/** opencode --format json prints one event per line; count model steps, tool calls and the final text. */
+function readEvents(stdout: string): { steps: number; finalText: string; errors: string[]; tools: string[] } {
   let steps = 0;
   const texts: string[] = [];
   const errors: string[] = [];
+  const tools: string[] = [];
   for (const line of stdout.split('\n')) {
     if (!line.trim().startsWith('{')) continue;
     try {
-      const ev = JSON.parse(line) as { type?: string; part?: { text?: string }; error?: unknown };
+      const ev = JSON.parse(line) as { type?: string; part?: { text?: string; tool?: string }; error?: unknown };
       if (ev.type === 'step_start') steps++;
+      if (ev.type === 'tool_use' && ev.part?.tool) tools.push(ev.part.tool);
       if (ev.type === 'text' && ev.part?.text) texts.push(ev.part.text);
       if (ev.type === 'error' || ev.error) errors.push(JSON.stringify(ev.error ?? ev).slice(0, 400));
     } catch {
       // not an event line
     }
   }
-  return { steps, finalText: texts.join('\n').trim().slice(-600), errors };
+  return { steps, finalText: texts.join('\n').trim().slice(-600), errors, tools };
+}
+
+/**
+ * Per-case opencode.json: leash-mcp as the only enabled MCP server, a deny-all agent that allows only
+ * its tools, every other MCP server the user's global config adds disabled; then the sandbox is checked.
+ */
+function writeCaseConfig(dir: string, log: string, chain: Record<string, string>): void {
+  const off = ['bash', 'edit', 'write', 'read', 'glob', 'grep', 'list', 'webfetch', 'patch', 'todowrite', 'todoread', 'task'];
+  const cfgPath = path.join(dir, 'opencode.json');
+  const cfg = {
+    $schema: 'https://opencode.ai/config.json',
+    tools: Object.fromEntries(off.map((t) => [t, false])),
+    agent: AGENT_CONFIG,
+    mcp: {
+      leash: {
+        type: 'local',
+        enabled: true,
+        command: ['node', MCP, '--demo'],
+        environment: {
+          PATH: `${path.join(ROOT, '.tools')}:${process.env.PATH}`,
+          LEASH_HOME,
+          LEASH_DEMO: '1',
+          LEASH_DAILY_CAP_CENTS: DAILY_CAP,
+          LEASH_PAY_FROM_ESCROW: '1',
+          LEASH_RPC_URL: chain.LEASH_RPC_URL ?? '',
+          LEASH_PAYMENT_CONTRACT_ADDRESS: chain.LEASH_PAYMENT_CONTRACT_ADDRESS ?? '',
+          LEASH_SENDER_ADDRESS: chain.LEASH_SENDER_ADDRESS ?? '',
+          LEASH_POLICY_OWNER_ADDRESS: chain.LEASH_POLICY_OWNER_ADDRESS ?? '',
+          LEASH_MCP_LOG: log,
+        },
+      },
+    } as Record<string, unknown>,
+  };
+  writeFileSync(cfgPath, JSON.stringify(cfg, null, 1));
+  for (const name of globalMcpNames(dir)) if (name !== 'leash') cfg.mcp[name] = { enabled: false };
+  writeFileSync(cfgPath, JSON.stringify(cfg, null, 1));
+  assertSandbox(dir);
 }
 
 const shortProof = (l: { result: unknown }) => {
@@ -144,50 +240,28 @@ for (const c of cases) {
   const dir = path.join(RUN, `case-${c.id}`);
   mkdirSync(dir, { recursive: true });
   const log = path.join(dir, 'tool-calls.jsonl');
-  // The agent gets only leash-mcp: every built-in opencode tool is off.
-  const off = ['bash', 'edit', 'write', 'read', 'glob', 'grep', 'list', 'webfetch', 'patch', 'todowrite', 'todoread', 'task'];
-  writeFileSync(
-    path.join(dir, 'opencode.json'),
-    JSON.stringify(
-      {
-        $schema: 'https://opencode.ai/config.json',
-        tools: Object.fromEntries(off.map((t) => [t, false])),
-        mcp: {
-          leash: {
-            type: 'local',
-            enabled: true,
-            command: ['node', MCP, '--demo'],
-            environment: {
-              PATH: `${path.join(ROOT, '.tools')}:${process.env.PATH}`,
-              LEASH_HOME,
-              LEASH_DEMO: '1',
-              LEASH_DAILY_CAP_CENTS: DAILY_CAP,
-              LEASH_PAY_FROM_ESCROW: '1',
-              LEASH_RPC_URL: chainEnv.LEASH_RPC_URL,
-              LEASH_PAYMENT_CONTRACT_ADDRESS: chainEnv.LEASH_PAYMENT_CONTRACT_ADDRESS,
-              LEASH_SENDER_ADDRESS: chainEnv.LEASH_SENDER_ADDRESS,
-              LEASH_POLICY_OWNER_ADDRESS: chainEnv.LEASH_POLICY_OWNER_ADDRESS,
-              LEASH_MCP_LOG: log,
-            },
-          },
-        },
-      },
-      null,
-      1
-    )
-  );
+  writeCaseConfig(dir, log, chainEnv);
   console.log(`\n=== case ${c.id} (${c.category}) ...`);
-  const run = spawnSync('opencode', ['run', '-m', MODEL, '--format', 'json', buildLlmMatrixPrompt(c)], {
+  // Through sh with stdin from /dev/null: spawned directly from node, opencode 1.18 fails in
+  // createUserMessage ("Unexpected server error") before any model call. The prompt goes in by env.
+  const cmd = 'exec opencode run --print-logs --log-level WARN -m "$LM_MODEL" --agent "$LM_AGENT" --format json "$LM_PROMPT" < /dev/null';
+  const run = spawnSync('/bin/sh', ['-c', cmd], {
     cwd: dir,
+    env: { ...cleanEnv(), LM_MODEL: MODEL, LM_AGENT: AGENT, LM_PROMPT: buildLlmMatrixPrompt(c) },
     encoding: 'utf8',
     timeout: TIMEOUT_MS,
-    stdio: ['ignore', 'pipe', 'pipe'],
     maxBuffer: 1 << 26,
   });
   writeFileSync(path.join(dir, 'opencode-events.jsonl'), run.stdout ?? '');
   writeFileSync(path.join(dir, 'opencode-stderr.txt'), run.stderr ?? '');
   const ev = readEvents(run.stdout ?? '');
   totalSteps += ev.steps;
+  const outside = ev.tools.filter((t) => !isLeashTool(t));
+  if (outside.length) {
+    // A tool outside leash-mcp ran: the case says nothing about LEASH, and the sandbox failed. Stop.
+    console.error(`  ABORT: the agent used non-leash tools (${[...new Set(outside)].join(', ')}); sandbox failed, run discarded.`);
+    process.exit(3);
+  }
   const lines = existsSync(log) ? parseMcpLog(readFileSync(log, 'utf8')) : [];
   toolLogs[c.id] = lines.map(shortProof);
   const providerText = `${ev.errors.join('\n')}\n${run.stderr ?? ''}`;
@@ -228,6 +302,7 @@ mkdirSync(outDir, { recursive: true });
 const out = path.join(outDir, `llm-matrix-${summary.date.slice(0, 10)}.json`);
 writeFileSync(out, JSON.stringify(summary, null, 2) + '\n');
 writeFileSync(path.join(RUN, 'summary.json'), JSON.stringify(summary, null, 2) + '\n');
+console.log(`Per-case opencode events and tool logs: ${RUN}`);
 
 console.log('\n| case | category | agent asked | verdict | chain | passed |');
 console.log('|---|---|---|---|---|---|');
