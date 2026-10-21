@@ -30,9 +30,9 @@ export function LandingHero() {
         <div>
           <h1 className="lp-hero-h">A spending leash your agent can&rsquo;t slip.</h1>
           <p className="lp-lead">
-            LEASH lets an AI agent pay only inside a secret policy: a merchant allowlist and a
-            per-transaction cap. Every payment carries a Noir proof that is checked before any money
-            moves, even when the agent is prompt-injected.
+            LEASH lets an AI agent pay only inside a secret policy: a merchant allowlist with each
+            merchant&rsquo;s payee, a per-payment cap and a daily cap. Every payment carries a Noir proof
+            that is checked before any money moves, even when the agent is prompt-injected.
           </p>
           <div className="lp-cta">
             <a className="btn btn-accent" href="#console">
@@ -133,11 +133,15 @@ const FAQ: Array<{ q: string; a: string }> = [
   },
   {
     q: 'What does everyone else see?',
-    a: 'The policy commitment, the amount in cents, the merchant hash, the nonce and the recipient. Never the cap or the allowlist.',
+    a: 'The policy commitment, the amount in cents, a salted merchant hash, the nonce, the payee, the UTC day and two spend commitments. Never the caps, the allowlist or how much was spent today.',
   },
   {
     q: 'What stops a replay or a redirected payment?',
-    a: 'Nonces are scoped per policy and consumed once. The recipient is a public input, so a proof sent to any other address fails verification with SumcheckFailed.',
+    a: 'Nonces are scoped per policy and consumed once. Each merchant’s payee is inside its allowlist leaf, so a proof can only name that payee, and a proof sent to any other address fails verification with SumcheckFailed.',
+  },
+  {
+    q: 'Can an agent split a big payment into small ones?',
+    a: 'Only up to the daily cap. Each proof opens the previous spend commitment and commits to the new total; the contract (or gateway) stores the latest one, so two proofs built on the same total can’t both land.',
   },
   {
     q: 'Who can move the escrow?',
@@ -145,11 +149,11 @@ const FAQ: Array<{ q: string; a: string }> = [
   },
   {
     q: 'Does the PayPal release work yet?',
-    a: 'Not yet. Orders v2 create and capture are wired in, but no sandbox order has run: it needs PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET. Without them the release reports “not configured” and the payment is logged as NOT PAID.',
+    a: 'Implemented, live run pending sandbox keys. Orders v2 create (custom_id bound to the proof), buyer approval or a vaulted wallet, and capture checked against the proven cents are in the code; no sandbox order has run because PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET are not set. Without them the gateway answers “Setup required” and consumes nothing.',
   },
   {
     q: 'Is this on a public network?',
-    a: 'No. The contract path has run on a local Anvil chain only, and leash-mcp’s on-chain tool refuses any chain id other than 31337.',
+    a: 'No. The contract path has run on a local Anvil chain only, as a settlement stand-in (1 cent settles as 1 wei), and leash-mcp’s on-chain tool refuses any chain id other than 31337.',
   },
 ];
 
@@ -188,13 +192,13 @@ export function LandingSections({ paypalOrderId, paypalStatus }: LandingSections
           </div>
           <div className="copy lp-lead">
             <p>
-              <b>The rules stay private.</b> Only a Pedersen commitment to the cap and the allowlist is
+              <b>The rules stay private.</b> Only a Pedersen commitment to the caps and the allowlist is
               public.
             </p>
             <p>
-              <b>Every payment is proven.</b> The circuit checks the amount is within the cap and the
-              merchant is in the allowlist. The gateway, or the LeashPayment contract, verifies the proof
-              before anything is released.
+              <b>Every payment is proven.</b> The circuit checks the amount is within the per-payment and
+              daily caps and that the merchant and its payee are in the allowlist. The gateway, or the
+              LeashPayment contract, verifies the proof before anything is released.
             </p>
           </div>
         </div>
@@ -213,7 +217,7 @@ export function LandingSections({ paypalOrderId, paypalStatus }: LandingSections
               <div className="lp-ui">
                 <div className="text-[14px] text-[#5a6382]">Private witness</div>
                 <div className="lp-chips mt-3">
-                  {['max_per_tx', 'merkle_root', 'policy_salt', 'merchant_id', 'merkle path'].map((c) => (
+                  {['max_per_tx', 'daily_cap', 'merkle_root', 'salts', 'merchant_id', 'spent_before'].map((c) => (
                     <span key={c} className="mono !bg-[#fff6d6] !text-[13px]">
                       {c}
                     </span>
@@ -229,8 +233,8 @@ export function LandingSections({ paypalOrderId, paypalStatus }: LandingSections
               <div>
                 <h3 className="lp-card-h">The rules stay secret</h3>
                 <p>
-                  The cap and the allowlist are private inputs. The circuit proves they hash to the public
-                  commitment, so an agent can&rsquo;t lie about either.
+                  The caps and the allowlist are private inputs. The circuit proves they hash to the public
+                  commitment, so an agent can&rsquo;t lie about any of them.
                 </p>
               </div>
             </article>
@@ -239,12 +243,12 @@ export function LandingSections({ paypalOrderId, paypalStatus }: LandingSections
               <div>
                 <h3 className="lp-card-h">Bound to one payment</h3>
                 <p>
-                  Five public inputs tie each proof to exactly one payment. Change any of them and
-                  verification fails.
+                  Eight public inputs tie each proof to exactly one payment and one step of the day&rsquo;s
+                  spend chain. Change any of them and verification fails.
                 </p>
               </div>
               <div className="lp-chips">
-                {['policy_commitment', 'amount (cents)', 'merchant_id_hash', 'nonce', 'recipient'].map((c, i) => (
+                {['policy_commitment', 'amount (cents)', 'merchant_id_hash', 'nonce', 'recipient', 'epoch', 'prev_spend', 'new_spend'].map((c, i) => (
                   <span key={c} className={`mono !text-[13px] ${i === 1 ? 'on' : ''}`}>
                     {c}
                   </span>
@@ -282,7 +286,7 @@ export function LandingSections({ paypalOrderId, paypalStatus }: LandingSections
       <section className="lp-sec" style={{ paddingTop: 0 }} aria-label="Key numbers">
         <div className="lp-wrap lp-stats">
           <div className="lp-stat">
-            <b>5</b>
+            <b>8</b>
             <span>public inputs bind each proof to one payment</span>
           </div>
           <div className="lp-stat">
@@ -290,8 +294,8 @@ export function LandingSections({ paypalOrderId, paypalStatus }: LandingSections
             <span>merchants per allowlist, a depth-4 Merkle tree</span>
           </div>
           <div className="lp-stat">
-            <b>24</b>
-            <span>prompt-injection vectors in the harness: 20 attacks, 4 legitimate</span>
+            <b>26</b>
+            <span>cases in the policy-violation matrix: 22 violations, 4 legitimate</span>
           </div>
           <div className="lp-stat">
             <b>0</b>

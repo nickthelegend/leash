@@ -22,6 +22,7 @@ interface HarnessSummary {
   legitimatePassed: number;
   legitimatePassedPercent: number;
   allGuaranteesHeld: boolean;
+  errors?: number;
   results?: Array<{
     testCase: TestCase;
     outcome: string;
@@ -65,19 +66,14 @@ export function PromptInjectionMatrix() {
     }
   };
 
-  // The harness records any prover failure as BLOCKED, including a missing toolchain. Flag those so a
-  // setup failure is never read as a policy win.
-  const setupHits = summary?.results
-    ? summary.results.filter((r) =>
-        /not configured|not found on PATH|Install via|Generate the key|ENOENT|LEASH_RECIPIENT_ADDRESS/i.test(r.reason)
-      ).length
-    : 0;
+  // A case that failed on setup (no nargo/bb, no keys) is an ERROR, never a block: surface it.
+  const setupHits = summary?.errors ?? summary?.results?.filter((r) => r.outcome === 'ERROR').length ?? 0;
 
   const tiles = [
     {
-      label: 'Injections blocked',
+      label: 'Violations blocked',
       value: summary ? `${summary.injectionsBlockedPercent.toFixed(0)}%` : '—',
-      sub: summary ? `${summary.injectionsBlocked} of ${summary.injectionCount}` : '20 attack vectors',
+      sub: summary ? `${summary.injectionsBlocked} of ${summary.injectionCount}` : '22 violation cases',
     },
     {
       label: 'Legitimate allowed',
@@ -87,7 +83,7 @@ export function PromptInjectionMatrix() {
     {
       label: 'All guarantees held',
       value: summary ? (summary.allGuaranteesHeld ? 'Yes' : 'No') : '—',
-      sub: summary ? `${summary.totalTests} vectors run` : 'not run yet',
+      sub: summary ? `${summary.totalTests} cases run` : 'not run yet',
     },
     {
       label: 'Defense layer',
@@ -101,11 +97,12 @@ export function PromptInjectionMatrix() {
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
           <h2 className="text-[26px] sm:text-[32px] leading-[1.05] font-medium tracking-tightest">
-            Prompt-injection harness
+            Policy-violation matrix
           </h2>
           <p className="mt-2 text-[14px] text-white/65 max-w-[60ch]">
-            24 vectors (cap overrides, unlisted merchants, homoglyphs, jailbreaks, edge cases and 4 legitimate
-            payments), each run through the real prover and verifier against the default policy.
+            26 payments an injected agent might ask for: cap overrides, unlisted merchants, homoglyphs, a swapped
+            payee, a daily-cap drain and 4 legitimate payments. Each case&rsquo;s merchant, amount and payee go
+            straight to the real prover and verifier; the prompt text is a label, no LLM reads it.
           </p>
         </div>
 
@@ -120,21 +117,21 @@ export function PromptInjectionMatrix() {
           ) : (
             <Play aria-hidden="true" />
           )}
-          <span>{isRunning ? 'Running 24 vectors…' : summary ? 'Run again' : 'Run the harness'}</span>
+          <span>{isRunning ? 'Running 26 cases…' : summary ? 'Run again' : 'Run the matrix'}</span>
         </button>
       </div>
 
       {error && (
         <div role="alert" className="mt-5 rounded-2xl bg-no-soft px-4 py-3 text-[13.5px] text-no break-words">
-          Harness failed: {error}
+          Matrix run failed: {error}
         </div>
       )}
 
       {setupHits > 0 && (
         <div role="alert" className="mt-5 rounded-2xl bg-sun px-4 py-3 text-[13.5px] text-sun-ink">
-          <span className="font-medium">Setup required.</span> {setupHits} of {summary?.totalTests} vectors failed on
-          missing setup (nargo, bb, keys or recipient), not on a policy rule. Fix the setup and run again before
-          reading these numbers.
+          <span className="font-medium">Setup required.</span> {setupHits} of {summary?.totalTests} cases failed on
+          missing setup (nargo, bb or keys), not on a policy rule. Fix the setup and run again before reading
+          these numbers.
         </div>
       )}
 
@@ -184,7 +181,7 @@ export function PromptInjectionMatrix() {
         </div>
       ) : (
         <div className="mt-6">
-          <div className="text-[13px] text-white/60 mb-2">Two of the 24 vectors</div>
+          <div className="text-[13px] text-white/60 mb-2">Two of the 26 cases</div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="rounded-2xl bg-cobalt-700 p-4">
               <div className="flex items-center gap-2 text-[14px] font-medium">
@@ -206,7 +203,7 @@ export function PromptInjectionMatrix() {
             </div>
           </div>
           <p className="mt-3 text-[12.5px] text-white/50">
-            Nothing has run yet. Results appear here once the harness finishes; nothing is shown before then.
+            Nothing has run yet. Results appear here once the matrix finishes; nothing is shown before then.
           </p>
         </div>
       )}

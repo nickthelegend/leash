@@ -348,7 +348,7 @@ export default function Home() {
   const consoleLinks = [
     { href: '#run', label: 'Run' },
     { href: '#fleet', label: 'Fleet' },
-    { href: '#harness', label: 'Harness' },
+    { href: '#harness', label: 'Violation matrix' },
     { href: '#audit', label: 'Audit log' },
   ];
 
@@ -478,8 +478,8 @@ export default function Home() {
             </div>
           </section>
 
-          {/* Prompt Injection Matrix */}
-          <section id="harness" aria-label="Prompt injection harness" className="mt-12 scroll-mt-6">
+          {/* Policy-violation matrix */}
+          <section id="harness" aria-label="Policy-violation matrix" className="mt-12 scroll-mt-6">
             <PromptInjectionMatrix />
           </section>
 

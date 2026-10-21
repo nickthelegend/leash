@@ -43,11 +43,11 @@ To use binaries somewhere else, set `NARGO=/path/to/nargo BB=/path/to/bb`.
 ```
 
 The script exits with an error unless `nargo --version` reports 1.0.0-beta.16 and `bb --version`
-reports 3.0.1. It compiles `circuits/`, runs it with the witness in `circuits/Prover.toml`, and writes the
-EVM (keccak oracle hash, `-t evm`) verification key and `contracts/src/LeashVerifier.sol`, plus the
-default-target key in `circuits/target/vk/` (git-ignored) that the off-chain verifier in `packages/core` uses. It then proves,
-checks the proof natively with `bb verify`, and copies `proof` and `public_inputs` into
-`contracts/test/fixtures/`.
+reports 3.0.1. It compiles `circuits/` and `packages/core/policy_circuit`, writes the EVM (keccak
+oracle hash, `-t evm`) verification key and `contracts/src/LeashVerifier.sol`, plus the default-target
+key in `circuits/target/vk/` (git-ignored) that the off-chain verifier in `packages/core` uses, and
+prints both `vk_hash` values. `scripts/gen-fixtures.cjs` then proves each forge test case with
+`@leash/core`, checks it with `bb verify`, and writes `contracts/test/fixtures/<case>/`.
 
 Then run:
 
@@ -55,8 +55,8 @@ Then run:
 cd contracts && forge test -vv
 ```
 
-`packages/core` (prover, verifier, and its tests) runs `nargo` and `bb` from `PATH`, so put the pinned
-binaries first when you run it:
+`packages/core` (prover, verifier, and its tests) runs `$NARGO` / `$BB` if set, else `.tools/nargo` and
+`.tools/bb` when present, else `nargo` / `bb` from `PATH`. The root test script also uses `.tools`:
 
 ```sh
 PATH="$PWD/.tools:$PATH" pnpm test
