@@ -356,7 +356,7 @@ export default function Home() {
     <div className="min-h-screen flex flex-col">
       <Navbar />
       <LandingHero />
-      <LandingSections paypalOrderId={latestOrder?.paypalOrderId} paypalStatus={latestOrder?.paypalStatus} />
+      <LandingSections />
 
       {/* Console: the app frame */}
       <main id="console" className="bg-sun px-3 sm:px-6 lg:px-10 pt-12 sm:pt-16 pb-12 scroll-mt-0" aria-label="LEASH console">

@@ -25,7 +25,7 @@ export function LeashLogo({
   return (
     <a
       href={href}
-      className={`lp-logo inline-flex items-center gap-2.5 no-underline font-semibold text-[22px] tracking-[-0.04em] ${className}`}
+      className={`inline-flex items-center gap-2.5 no-underline font-semibold text-[22px] tracking-[-0.04em] ${className}`}
       aria-label="LEASH home"
     >
       <LeashMark className="w-[30px] h-[30px]" tone={tone} />

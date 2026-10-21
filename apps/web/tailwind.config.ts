@@ -1,6 +1,6 @@
 import type { Config } from 'tailwindcss';
 
-// LEASH theme: deep cobalt + sky-yellow, Sora for type, JetBrains Mono for hashes and proof bytes.
+// LEASH theme: deep cobalt + sky-yellow, Sora for type, Source Code Pro for hashes and proof bytes.
 const config: Config = {
   content: [
     './pages/**/*.{js,ts,jsx,tsx,mdx}',

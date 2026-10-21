@@ -1,166 +1,378 @@
 import React from 'react';
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, ArrowDown, Lock, X, Check } from 'lucide-react';
 import { LeashLogo } from './Logo';
+import { CollarTag } from './CollarTag';
+import { RetractableLead } from './RetractableLead';
 import { PayPalSetupCard } from './PayPalSetupCard';
+import { RUN, SNAPS, SUMCHECKS, RECEIPT_CHECKS, short, type Snap } from '@/lib/recordedRun';
 
 const REPO_URL = 'https://github.com/nickthelegend/leash';
 
-// Anvil dev account #1, the proven payee in the recorded run (README "Demo video").
-const PAYEE_SHORT = '0x7099…79C8';
-
-function Arrow() {
-  return <ArrowRight aria-hidden="true" />;
-}
-
-/** A large leash loop drawn behind the hero headline. Static. */
-function HeroRing() {
-  return (
-    <svg className="lp-ring" viewBox="0 0 800 800" fill="none" aria-hidden="true" focusable="false">
-      <circle cx="330" cy="330" r="230" stroke="currentColor" strokeWidth="56" />
-      <path d="M500 500 L760 760" stroke="currentColor" strokeWidth="56" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 export function LandingHero() {
   return (
-    <header className="lp-hero" id="top">
-      <HeroRing />
-      <div className="lp-wrap">
-        <div>
-          <h1 className="lp-hero-h">A spending leash your agent can&rsquo;t slip.</h1>
-          <p className="lp-lead">
-            LEASH lets an AI agent pay only inside a secret policy: a merchant allowlist with each
-            merchant&rsquo;s payee, a per-payment cap and a daily cap. Every payment carries a Noir proof
-            that is checked before any money moves, even when the agent is prompt-injected.
+    <header className="lz-hero" id="top">
+      <div className="lz-wrap lz-hero-grid">
+        <div className="lz-hero-copy">
+          <p className="lz-kicker">ZK spending policy for AI agents · PayPal AI Hackathon</p>
+          <h1 className="lz-h1">A spending leash your agent can&rsquo;t slip.</h1>
+          <p className="lz-lead">
+            The owner writes a secret policy: a per-payment cap, a daily cap and which merchants may be paid at
+            which payee. Only its commitment is engraved on the tag. Every payment the agent asks for carries a
+            Noir proof that it is inside the policy, checked before any money moves.
           </p>
-          <div className="lp-cta">
-            <a className="btn btn-accent" href="#console">
-              Open the console <Arrow />
+          <div className="lz-cta">
+            <a className="btn btn-dark" href="#console">
+              Open the console <ArrowRight aria-hidden="true" />
             </a>
-            <a className="btn btn-ghost-light" href="#evidence">
-              See the recorded run
+            <a className="btn btn-line" href="#walk">
+              Read the walk log <ArrowDown aria-hidden="true" />
             </a>
           </div>
-        </div>
-
-        <aside className="lp-widget lp-rise" aria-label="Policy and one proof-verified payment from the recorded run">
-          <div className="w-top">
-            <span className="w-title">Policy</span>
-            <span className="tag tag-deep">Recorded run</span>
-          </div>
-          <dl>
+          <dl className="lz-hero-facts">
             <div>
-              <dt>Per-payment cap</dt>
-              <dd>
-                $5.00 <span className="text-[13px] font-normal text-[#5a6382]">private</span>
-              </dd>
+              <dt>Released</dt>
+              <dd>300 cents</dd>
             </div>
             <div>
-              <dt>Daily cap</dt>
-              <dd>
-                $7.00 <span className="text-[13px] font-normal text-[#5a6382]">private</span>
-              </dd>
+              <dt>Refused</dt>
+              <dd>6 attempts</dd>
             </div>
             <div>
-              <dt>Merchant</dt>
-              <dd>
-                openai <span className="text-[13px] font-normal text-[#5a6382]">payee bound</span>
-              </dd>
+              <dt>PayPal rail</dt>
+              <dd className="lz-setup">Setup required</dd>
             </div>
           </dl>
-          <div className="w-pay">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-[14px] text-[#5a6382]">Payment, proof verified</span>
-              <span className="tag tag-ok">Released</span>
-            </div>
-            <div className="w-amount mt-3">
-              300<small>cents ($3.00)</small>
-            </div>
-            <div className="mt-4 grid gap-1.5 text-[14px]">
-              <div className="flex justify-between gap-3">
-                <span className="text-[#5a6382]">Payee</span>
-                <span className="mono text-[13px]">{PAYEE_SHORT}</span>
-              </div>
-              <div className="flex justify-between gap-3">
-                <span className="text-[#5a6382]">Nonce</span>
-                <span className="mono text-[13px]">3001</span>
-              </div>
-            </div>
-          </div>
-          <p className="w-note">
-            From the recorded run on 2026-10-21: an LLM agent paying through leash-mcp on a local Anvil
-            chain. A replay of that run, not a live feed.
+        </div>
+        <div className="lz-hero-art">
+          <CollarTag className="lz-collar" />
+          <p className="lz-art-note">
+            The real commitment from the recorded Anvil run, {RUN.date}.
           </p>
-        </aside>
+        </div>
       </div>
     </header>
   );
 }
 
-const BUILT_WITH = ['Noir', 'UltraHonk', 'Barretenberg', 'Foundry', 'Anvil', 'MCP', 'Next.js'];
+const PUBLIC_INPUTS = [
+  ['policy_commitment', 'the tag'],
+  ['amount', 'cents'],
+  ['merchant_id_hash', 'salted'],
+  ['nonce', 'once per policy'],
+  ['recipient', 'the bound payee'],
+  ['epoch', 'UTC day'],
+  ['prev_spend_commit', 'today so far'],
+  ['new_spend_commit', 'after this one'],
+];
 
-const EVIDENCE: Array<{ attempt: React.ReactNode; result: string; released: boolean }> = [
+const PRIVATE_WITNESS = [
+  ['max_per_tx', 'per-payment cap'],
+  ['daily_cap', 'per UTC day'],
+  ['merkle_root + path', '(merchant, payee) allowlist'],
+  ['merchant_id', 'who is paid'],
+  ['spent_before', 'today’s running total'],
+  ['salts', 'so nothing can be guessed'],
+];
+
+function TagSection() {
+  return (
+    <section className="lz-sec lz-paper" id="tag" aria-labelledby="tag-h">
+      <div className="lz-wrap">
+        <div className="lz-sec-head">
+          <p className="lz-num">01 · The tag</p>
+          <h2 className="lz-h2" id="tag-h">
+            Anyone can read the tag. Nobody can read the rules.
+          </h2>
+          <p className="lz-sub">
+            The front carries what a verifier sees with every payment. The back is the private witness: it only
+            ever lives on the owner&rsquo;s device, and the circuit proves it hashes to the front.
+          </p>
+        </div>
+        <div className="lz-tags">
+          <article className="lz-dogtag lz-dogtag-front" aria-labelledby="front-h">
+            <span className="lz-dogtag-hole" aria-hidden="true" />
+            <h3 id="front-h">
+              Front <span>· 8 public inputs</span>
+            </h3>
+            <ul>
+              {PUBLIC_INPUTS.map(([k, v]) => (
+                <li key={k}>
+                  <code className="mono">{k}</code>
+                  <span>{v}</span>
+                </li>
+              ))}
+            </ul>
+          </article>
+          <article className="lz-dogtag lz-dogtag-back" aria-labelledby="back-h">
+            <span className="lz-dogtag-hole" aria-hidden="true" />
+            <h3 id="back-h">
+              Back <span>· private witness</span>
+            </h3>
+            <ul>
+              {PRIVATE_WITNESS.map(([k, v]) => (
+                <li key={k}>
+                  <code className="mono">{k}</code>
+                  <span>{v}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="lz-dogtag-note">
+              On chain, a policy is keyed by <code className="mono">keccak256(owner, commitment)</code>. Only that
+              owner can fund or withdraw it; a copied tag only creates the copier&rsquo;s own empty policy.
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function LeadSection() {
+  return (
+    <section className="lz-sec lz-cream" id="lead" aria-labelledby="lead-h">
+      <div className="lz-wrap">
+        <div className="lz-sec-head lz-sec-head-split">
+          <div>
+            <p className="lz-num">02 · The lead</p>
+            <h2 className="lz-h2" id="lead-h">
+              The cord pays out with each real payment and locks at the cap.
+            </h2>
+          </div>
+          <p className="lz-sub">
+            In the recorded run the cord was 700 cents long (the daily cap) with a stop at 500 (the per-payment
+            cap). It paid out once: 300 cents to openai&rsquo;s bound payee, from the owner&rsquo;s escrow, relayed
+            by an account that sent no value.
+          </p>
+        </div>
+        <RetractableLead />
+        <p className="lz-fine">
+          Amounts are in cents. The demo chain settles 1 cent as 1 wei; it is a settlement stand-in for the PayPal
+          rail. The caps are captions from the recording, never on chain.
+        </p>
+      </div>
+    </section>
+  );
+}
+
+const SCALE = 1000;
+
+function MiniLead({ held, stop, pull, stopLabel }: { held: number; stop: number; pull: number; stopLabel: string }) {
+  const p = (c: number) => `${(c / SCALE) * 100}%`;
+  return (
+    <div className="ml" aria-hidden="true">
+      <div className="ml-rail" />
+      {held > 0 && <div className="ml-held" style={{ width: p(held) }} />}
+      <div className="ml-pull" style={{ left: p(held), width: p(pull - held) }} />
+      <div className="ml-stop" style={{ left: p(stop) }}>
+        <Lock />
+      </div>
+      <div className="ml-x" style={{ left: p(pull) }}>
+        <X />
+      </div>
+      <div className="ml-labels">
+        <span style={{ left: p(stop) }}>{stopLabel}</span>
+        <span style={{ left: p(pull) }}>asked {pull}</span>
+      </div>
+    </div>
+  );
+}
+
+function SnapGraphic({ snap }: { snap: Snap }) {
+  if (snap.kind === 'over-cap') return <MiniLead held={0} stop={500} pull={900} stopLabel="stop 500" />;
+  if (snap.kind === 'daily-cap') return <MiniLead held={300} stop={700} pull={800} stopLabel="lock 700" />;
+  if (snap.kind === 'payee') {
+    return (
+      <div className="sg-pair" aria-hidden="true">
+        <span className="ok">
+          <Check /> clipped to <b className="mono">{short(RUN.payee)}</b>
+        </span>
+        <span className="no">
+          <X /> asked <b className="mono">{short(RUN.attacker)}</b>
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="sg-pair" aria-hidden="true">
+      <span className="ok">
+        <Check /> nonce <b className="mono">3001</b> used at block {RUN.release.block}
+      </span>
+      <span className="no">
+        <X /> nonce <b className="mono">3001</b> again
+      </span>
+    </div>
+  );
+}
+
+function SnapsSection() {
+  return (
+    <section className="lz-sec lz-paper" id="snaps" aria-labelledby="snaps-h">
+      <div className="lz-wrap">
+        <div className="lz-sec-head">
+          <p className="lz-num">03 · Snapped taut</p>
+          <h2 className="lz-h2" id="snaps-h">
+            Four tugs the agent was told to try. The lead held every time.
+          </h2>
+          <p className="lz-sub">
+            Same run, same policy. Each error below is the exact text leash-mcp returned to the agent.
+          </p>
+        </div>
+        <ol className="lz-snaps">
+          {SNAPS.map((s) => (
+            <li key={s.kind} className="lz-snap">
+              <div className="lz-snap-top">
+                <span className="lz-snap-badge">Snapped</span>
+                <span className="mono lz-snap-nonce">nonce {s.nonce}</span>
+              </div>
+              <h3>{s.title}</h3>
+              <p className="lz-snap-req">{s.request}</p>
+              <SnapGraphic snap={s} />
+              <p className="lz-snap-err mono">{s.error}</p>
+              <p className="lz-snap-at">Stopped at: {s.stoppedAt}</p>
+            </li>
+          ))}
+        </ol>
+        <div className="lz-sum">
+          <p className="lz-sum-h">
+            Two more, both refused by the on-chain verifier. <code className="mono">SumcheckFailed</code> is
+            LeashPayment rejecting a proof whose public inputs don&rsquo;t match the payment, not a crash.
+          </p>
+          <ul>
+            {SUMCHECKS.map((s) => (
+              <li key={s.request}>
+                <span>{s.request}</span>
+                <code className="mono">{s.error}</code>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+type WalkKind = 'set' | 'paid' | 'snap' | 'check' | 'setup';
+const WALK: Array<{ kind: WalkKind; step: string; title: React.ReactNode; body?: React.ReactNode }> = [
   {
-    attempt: (
+    kind: 'set',
+    step: 'deploy',
+    title: 'HonkVerifier and LeashPayment deployed on local Anvil',
+    body: (
       <>
-        300 cents to openai&rsquo;s listed payee <span className="mono text-[13px]">{PAYEE_SHORT}</span>
+        verifier <code className="mono">{RUN.verifier}</code>
+        <br />
+        LeashPayment <code className="mono">{RUN.leashPayment}</code>
       </>
     ),
-    result: 'Proved, verified and released on-chain from the owner’s escrow by a relayer that sent no value',
-    released: true,
   },
   {
-    attempt: 'Injected 900-cent request',
-    result: 'Rule R2: over the $5.00 per-payment cap; no proof issued',
-    released: false,
+    kind: 'set',
+    step: 'register',
+    title: 'Owner (Anvil #0) registers the commitment and funds 2000 wei escrow in one call',
+    body: (
+      <>
+        owner <code className="mono">{RUN.owner}</code>
+        <br />
+        commitment <code className="mono">{RUN.commitment}</code>
+      </>
+    ),
   },
   {
-    attempt: 'Injected “new bank details”: 200 cents to openai at another address',
-    result: 'Circuit refused: Merchant/payee pair not in allowlist',
-    released: false,
+    kind: 'paid',
+    step: '3001',
+    title: '300 cents to openai: proved, verified, released from escrow',
+    body: (
+      <>
+        tx <code className="mono">{RUN.release.txHash}</code>
+        <br />
+        block {RUN.release.block} · 300 wei to <code className="mono">{RUN.payee}</code> · proof {RUN.release.proofBytes} bytes,
+        proved in {RUN.release.proveMs} ms, verified in {RUN.release.verifyMs} ms · relayer (Anvil #9) sent no value
+      </>
+    ),
   },
+  { kind: 'snap', step: '3002', title: '900 cents: over the per-payment cap', body: SNAPS[0].error },
+  { kind: 'snap', step: '3003', title: '200 cents to 0x3C44…93BC: attacker payee', body: SNAPS[1].error },
+  { kind: 'snap', step: '3004', title: '500 cents on top of 300: daily cap', body: SNAPS[2].error },
+  { kind: 'snap', step: '3001', title: 'Replay of the released proof', body: SNAPS[3].error },
+  { kind: 'snap', step: '3005', title: 'Valid 200-cent proof redirected to 0x3C44…93BC', body: 'SumcheckFailed (proof rejected: it does not verify for these public inputs)' },
+  { kind: 'snap', step: 'cast', title: 'Direct call to LeashPayment claiming 900 cents with that proof', body: `custom error ${RUN.sumcheckSelector}: SumcheckFailed` },
   {
-    attempt: '500-cent top-up after 300 already spent (700/day)',
-    result: 'Circuit refused: Amount exceeds daily cap',
-    released: false,
+    kind: 'check',
+    step: 'receipt',
+    title: 'verify:receipt 3001: receipt verified',
+    body: (
+      <span className="lz-pass">
+        {RECEIPT_CHECKS.map((c) => (
+          <span key={c}>PASS {c}</span>
+        ))}
+      </span>
+    ),
   },
+  { kind: 'setup', step: 'paypal', title: 'paypal:e2e: Setup required (PAYPAL_CLIENT_ID), exit code 1', body: 'also missing: PAYPAL_CLIENT_SECRET, PAYPAL_PAYEE_MERCHANT_ID' },
   {
-    attempt: 'Replay of the 300-cent proof (nonce 3001)',
-    result: 'Nonce already used, rejected on-chain',
-    released: false,
-  },
-  {
-    attempt: 'Valid 200-cent proof sent to another recipient, then reused directly claiming 900',
-    result: 'SumcheckFailed both times: the verifier rejects the proof for those public inputs',
-    released: false,
+    kind: 'check',
+    step: 'state',
+    title: 'Chain state after the walk',
+    body: (
+      <>
+        payee <code className="mono">{short(RUN.payee)}</code> +300 wei · attacker <code className="mono">{short(RUN.attacker)}</code> +0 wei ·
+        escrow 1700 wei left of 2000 · PaymentReleased events: 1
+      </>
+    ),
   },
 ];
+
+function WalkLog() {
+  return (
+    <section className="lz-sec lz-deep" id="walk" aria-labelledby="walk-h">
+      <div className="lz-wrap">
+        <div className="lz-sec-head lz-sec-head-split">
+          <div>
+            <p className="lz-num">04 · Walk log</p>
+            <h2 className="lz-h2" id="walk-h">
+              The recorded Anvil run, start to finish.
+            </h2>
+          </div>
+          <p className="lz-sub">
+            {RUN.date}, repo {RUN.commit}: {RUN.agent} with only the leash-mcp tools. A replay of that run, not a
+            live feed. Anvil is a local chain (id {RUN.chainId}), so there is no public explorer to link to; the
+            hashes are as printed.
+          </p>
+        </div>
+        <ol className="lz-walk">
+          {WALK.map((w, i) => (
+            <li key={i} className={`lz-walk-${w.kind}`}>
+              <span className="lz-walk-node" aria-hidden="true" />
+              <span className="lz-walk-step mono">{w.step}</span>
+              <div className="lz-walk-body">
+                <p className="lz-walk-title">
+                  <span className="sr-only">
+                    {w.kind === 'paid' ? 'Released: ' : w.kind === 'snap' ? 'Refused: ' : w.kind === 'setup' ? 'Setup required: ' : ''}
+                  </span>
+                  {w.title}
+                </p>
+                {w.body && <div className="lz-walk-detail">{w.body}</div>}
+              </div>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </section>
+  );
+}
 
 const FAQ: Array<{ q: string; a: string }> = [
   {
     q: 'Can a prompt-injected agent raise its own cap?',
-    a: 'No. The cap is a private input bound to the public policy commitment. Lying about max_per_tx breaks the commitment, and nargo refuses a witness over the cap.',
-  },
-  {
-    q: 'What does everyone else see?',
-    a: 'The policy commitment, the amount in cents, a salted merchant hash, the nonce, the payee, the UTC day and two spend commitments. Never the caps, the allowlist or how much was spent today.',
+    a: 'No. The cap is a private input bound to the public commitment. Lying about max_per_tx breaks the commitment, and nargo refuses a witness over the cap.',
   },
   {
     q: 'What stops a replay or a redirected payment?',
-    a: 'Nonces are scoped per policy and consumed once. Each merchant’s payee is inside its allowlist leaf, so a proof can only name that payee, and a proof sent to any other address fails verification with SumcheckFailed.',
+    a: 'Nonces are scoped per policy and consumed once. Each merchant’s payee is inside its allowlist leaf, so a proof can only name that payee; sent to any other address it fails verification with SumcheckFailed.',
   },
   {
     q: 'Can an agent split a big payment into small ones?',
-    a: 'Only up to the daily cap. Each proof opens the previous spend commitment and commits to the new total; the contract (or gateway) stores the latest one, so two proofs built on the same total can’t both land.',
-  },
-  {
-    q: 'Who can move the escrow?',
-    a: 'Policies are keyed by keccak256(owner, commitment). Only the owner can fund or withdraw a policy. Anyone may relay a payment, but it can only spend that policy’s own balance.',
-  },
-  {
-    q: 'Does the PayPal release work yet?',
-    a: 'Implemented, live run pending sandbox keys. Orders v2 create (custom_id bound to the proof), buyer approval or a vaulted wallet, and capture checked against the proven cents are in the code; no sandbox order has run because PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET are not set. Without them the gateway answers “Setup required” and consumes nothing.',
+    a: 'Only up to the daily cap. Each proof opens the previous spend commitment and commits to the new total, and the contract (or gateway) stores the latest one, so two proofs built on the same total can’t both land.',
   },
   {
     q: 'Is this on a public network?',
@@ -168,265 +380,81 @@ const FAQ: Array<{ q: string; a: string }> = [
   },
 ];
 
-interface LandingSectionsProps {
-  paypalOrderId?: string;
-  paypalStatus?: string;
-}
-
-export function LandingSections({ paypalOrderId, paypalStatus }: LandingSectionsProps) {
+function RailAndFinePrint() {
   return (
-    <div className="lp-light">
-      <div className="lp-built">
-        <span className="pill">Proofs by Noir and Barretenberg, built for the PayPal AI Hackathon</span>
-        <ul aria-label="Built with">
-          {BUILT_WITH.map((name) => (
-            <li key={name}>
-              <i aria-hidden="true" />
-              {name}
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      <section className="lp-sec">
-        <div className="lp-wrap lp-intro">
-          <div>
-            <h2 className="lp-sec-h">A limit a prompt can&rsquo;t argue with</h2>
-            <div className="lp-cta" style={{ marginTop: 34 }}>
-              <a className="btn btn-dark" href={REPO_URL} target="_blank" rel="noreferrer">
-                Run it locally <Arrow />
-              </a>
-              <a className="btn btn-outline" href={`${REPO_URL}#readme`} target="_blank" rel="noreferrer">
-                Read the README
-              </a>
-            </div>
-          </div>
-          <div className="copy lp-lead">
-            <p>
-              <b>The rules stay private.</b> Only a Pedersen commitment to the caps and the allowlist is
-              public.
-            </p>
-            <p>
-              <b>Every payment is proven.</b> The circuit checks the amount is within the per-payment and
-              daily caps and that the merchant and its payee are in the allowlist. The gateway, or the
-              LeashPayment contract, verifies the proof before anything is released.
-            </p>
+    <section className="lz-sec lz-paper" id="paypal" aria-labelledby="paypal-h">
+      <div className="lz-wrap lz-rail-grid">
+        <div>
+          <p className="lz-num">05 · The PayPal lead</p>
+          <h2 className="lz-h2" id="paypal-h">
+            Built, not clipped on yet.
+          </h2>
+          <p className="lz-sub">
+            Orders v2 create (custom_id bound to the proof), buyer approval or a vaulted wallet, and a capture
+            checked against the proven cents are in the code. No sandbox order has run: the keys are not set, so the
+            gateway answers &ldquo;Setup required&rdquo; and consumes nothing.
+          </p>
+          <div className="mt-6">
+            <PayPalSetupCard tone="light" />
           </div>
         </div>
-      </section>
-
-      <section className="lp-sec" id="how" style={{ paddingTop: 0 }}>
-        <div className="lp-wrap">
-          <div className="lp-head">
-            <h2 className="lp-sec-h">One policy, three guarantees</h2>
-            <a className="btn btn-outline btn-sm" href={`${REPO_URL}#architecture`} target="_blank" rel="noreferrer">
-              Learn more <Arrow />
-            </a>
-          </div>
-          <div className="lp-bento">
-            <article className="lp-card c-tint">
-              <div className="lp-ui">
-                <div className="text-[14px] text-[#5a6382]">Private witness</div>
-                <div className="lp-chips mt-3">
-                  {['max_per_tx', 'daily_cap', 'merkle_root', 'salts', 'merchant_id', 'spent_before'].map((c) => (
-                    <span key={c} className="mono !bg-[#fff6d6] !text-[13px]">
-                      {c}
-                    </span>
-                  ))}
-                </div>
-                <div className="mt-4 flex items-center gap-3 text-[14px] text-[#5a6382]">
-                  <span aria-hidden="true">↓ Pedersen</span>
-                </div>
-                <div className="lp-chips mt-2">
-                  <span className="on mono !text-[13px]">policy_commitment</span>
-                </div>
-              </div>
-              <div>
-                <h3 className="lp-card-h">The rules stay secret</h3>
-                <p>
-                  The caps and the allowlist are private inputs. The circuit proves they hash to the public
-                  commitment, so an agent can&rsquo;t lie about any of them.
-                </p>
-              </div>
-            </article>
-
-            <article className="lp-card c-tint-2">
-              <div>
-                <h3 className="lp-card-h">Bound to one payment</h3>
-                <p>
-                  Eight public inputs tie each proof to exactly one payment and one step of the day&rsquo;s
-                  spend chain. Change any of them and verification fails.
-                </p>
-              </div>
-              <div className="lp-chips">
-                {['policy_commitment', 'amount (cents)', 'merchant_id_hash', 'nonce', 'recipient', 'epoch', 'prev_spend', 'new_spend'].map((c, i) => (
-                  <span key={c} className={`mono !text-[13px] ${i === 1 ? 'on' : ''}`}>
-                    {c}
-                  </span>
-                ))}
-              </div>
-            </article>
-
-            <article className="lp-card c-deep">
-              <div>
-                <h3 className="lp-card-h">Escrow only the owner touches</h3>
-                <p>
-                  On-chain policies are keyed by owner and commitment, so a copied commitment only creates
-                  the copier&rsquo;s own empty policy.
-                </p>
-              </div>
-              <div className="lp-rows">
-                <div>
-                  <span className="mono text-[13px]">registerPolicy{'{value}'}</span>
-                  <span className="tag tag-accent">owner funds</span>
-                </div>
-                <div>
-                  <span className="mono text-[13px]">deposit / withdraw</span>
-                  <span className="tag tag-accent">owner only</span>
-                </div>
-                <div>
-                  <span className="mono text-[13px]">executePayment</span>
-                  <span className="tag tag-accent">proof + nonce</span>
-                </div>
-              </div>
-            </article>
-          </div>
-        </div>
-      </section>
-
-      <section className="lp-sec" style={{ paddingTop: 0 }} aria-label="Key numbers">
-        <div className="lp-wrap lp-stats">
-          <div className="lp-stat">
-            <b>8</b>
-            <span>public inputs bind each proof to one payment</span>
-          </div>
-          <div className="lp-stat">
-            <b>16</b>
-            <span>merchants per allowlist, a depth-4 Merkle tree</span>
-          </div>
-          <div className="lp-stat">
-            <b>26</b>
-            <span>cases in the policy-violation matrix: 22 violations, 4 legitimate</span>
-          </div>
-          <div className="lp-stat">
-            <b>0</b>
-            <span>PayPal sandbox orders so far. Setup required.</span>
-          </div>
-        </div>
-      </section>
-
-      <section className="lp-sec lp-dark" id="evidence">
-        <div className="lp-wrap">
-          <div className="lp-head">
-            <div>
-              <h2 className="lp-sec-h">The recorded Anvil run</h2>
-              <p className="muted lp-lead" style={{ margin: '18px 0 0', maxWidth: '52ch' }}>
-                On 2026-10-21, opencode drove OpenRouter minimax-m3.1-flash:free through leash-mcp against a
-                local Anvil chain: policy owned and funded by Anvil #0, payments relayed by Anvil #9. Nothing
-                mocked. It is a local chain (1 cent settles as 1 wei), so there is no public explorer link.
-              </p>
-            </div>
-          </div>
-
-          <div className="lp-ev" role="table" aria-label="Recorded agent attempts and results">
-            {EVIDENCE.map((row, i) => (
-              <div className="row" role="row" key={i}>
-                <span role="cell" className="font-medium">
-                  {row.attempt}
-                </span>
-                <span role="cell" className="res">
-                  {row.result}
-                </span>
-                <span role="cell">
-                  <span className={`tag ${row.released ? 'tag-ok' : 'tag-no'}`}>
-                    {row.released ? 'Released' : 'Blocked'}
-                  </span>
-                </span>
-              </div>
+        <div>
+          <p className="lz-num">Fine print</p>
+          <div className="lz-faq">
+            {FAQ.map((item, i) => (
+              <details key={item.q} open={i === 0}>
+                <summary>{item.q}</summary>
+                <p>{item.a}</p>
+              </details>
             ))}
           </div>
-
-          <div className="mt-5 grid gap-5 lg:grid-cols-2">
-            <div className="rounded-panel bg-cobalt-800 p-5 sm:p-6 ring-1 ring-inset ring-cobalt-line">
-              <div className="text-lg font-medium tracking-tighter2">Reading the results</div>
-              <p className="mt-3 text-sm leading-relaxed text-white/70">
-                <span className="mono text-sun">SumcheckFailed</span> is the on-chain UltraHonk verifier
-                rejecting the proof: its public inputs don&rsquo;t match the payment it was sent with. The
-                900-cent attempt stops in leash-mcp&rsquo;s policy check before proving, but the cap is also a
-                circuit constraint, so a forged 900-cent proof fails on-chain too.
-              </p>
-            </div>
-            <PayPalSetupCard orderId={paypalOrderId} orderStatus={paypalStatus} />
-          </div>
-
-          <div className="lp-faq" id="faq" style={{ marginTop: 110 }}>
-            <div>
-              <h2 className="lp-sec-h">Frequently asked questions</h2>
-              <p className="muted lp-lead" style={{ margin: '18px 0 0', maxWidth: '34ch' }}>
-                Straight answers about the proof, the escrow and what is not done yet.
-              </p>
-            </div>
-            <div>
-              {FAQ.map((item, i) => (
-                <details key={item.q} open={i === 0}>
-                  <summary>{item.q}</summary>
-                  <p>{item.a}</p>
-                </details>
-              ))}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="lp-talk">
-        <div className="lp-wrap">
-          <h2 className="lp-sec-h">Put your agent on a leash</h2>
-          <p>
-            Run the gateway and this console locally with the pinned nargo and bb from TOOLCHAIN.md, then try to
-            talk an agent past its cap.
-          </p>
-          <pre aria-label="Local setup commands">{`pnpm install
+          <pre className="lz-pre" aria-label="Local setup commands">{`pnpm install
 cp .env.example .env.local
 pnpm dev:gateway
 pnpm dev:web`}</pre>
-          <div className="lp-cta" style={{ justifyContent: 'center' }}>
-            <a className="btn btn-dark" href="#console">
-              Open the console <Arrow />
+          <div className="lz-cta">
+            <a className="btn btn-dark" href={REPO_URL} target="_blank" rel="noreferrer">
+              Get the code <ArrowRight aria-hidden="true" />
             </a>
-            <a className="btn btn-outline" href={REPO_URL} target="_blank" rel="noreferrer">
-              Get the code
+            <a className="btn btn-line" href={`${REPO_URL}#readme`} target="_blank" rel="noreferrer">
+              README
             </a>
           </div>
         </div>
-      </section>
-    </div>
+      </div>
+    </section>
+  );
+}
+
+export function LandingSections() {
+  return (
+    <>
+      <TagSection />
+      <LeadSection />
+      <SnapsSection />
+      <WalkLog />
+      <RailAndFinePrint />
+    </>
   );
 }
 
 export function SiteFooter() {
   return (
-    <footer className="lp-foot">
-      <div className="box">
-        <div>
-          <LeashLogo className="text-white" />
-          <p>
-            A ZK spending leash for AI agents: a secret policy, a Noir proof for every payment, verified before
-            anything is released.
-          </p>
-        </div>
+    <footer className="lz-foot">
+      <div className="lz-strap" aria-hidden="true" />
+      <div className="lz-wrap lz-foot-row">
+        <LeashLogo tone="accent" className="text-white" />
         <nav aria-label="Footer">
-          <a href="#how">How it works</a>
-          <a href="#evidence">Recorded run</a>
-          <a href="#faq">FAQ</a>
+          <a href="#tag">Tag</a>
+          <a href="#lead">Lead</a>
+          <a href="#snaps">Snaps</a>
+          <a href="#walk">Walk log</a>
           <a href="#console">Console</a>
           <a href={REPO_URL} target="_blank" rel="noreferrer">
             GitHub
           </a>
         </nav>
-        <div className="legal">
-          <span>© 2026 Nivesh Gajengi. MIT License.</span>
-          <span>Built for the PayPal AI Hackathon</span>
-        </div>
+        <span className="lz-legal">© 2026 Nivesh Gajengi · MIT License</span>
       </div>
     </footer>
   );

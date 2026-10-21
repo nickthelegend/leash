@@ -1,33 +1,36 @@
-'use client';
-
 import React from 'react';
 import { LeashLogo } from './Logo';
 
 const REPO_URL = 'https://github.com/nickthelegend/leash';
 
-/** Landing nav: links left, logo centre, actions right. Sits over the cobalt hero. */
+/** Landing nav on the yellow hero: logo left, sections and the console on the right. */
 export function Navbar() {
   return (
-    <nav className="lp-nav" aria-label="Main">
-      <div className="lp-wrap">
-        <ul>
-          <li>
-            <a href="#how">How it works</a>
-          </li>
-          <li>
-            <a href="#evidence">Recorded run</a>
-          </li>
-          <li>
-            <a href="#faq">FAQ</a>
-          </li>
-        </ul>
-        <LeashLogo className="text-white" />
-        <div className="act">
-          <a href={REPO_URL} target="_blank" rel="noreferrer">
-            GitHub
-          </a>
-          <a className="btn btn-white btn-sm" href="#console">
-            Open the console
+    <nav className="lz-nav" aria-label="Main">
+      <div className="lz-wrap lz-nav-row">
+        <LeashLogo tone="deep" />
+        <div className="lz-nav-right">
+          <ul>
+            <li>
+              <a href="#tag">Tag</a>
+            </li>
+            <li>
+              <a href="#lead">Lead</a>
+            </li>
+            <li>
+              <a href="#snaps">Snaps</a>
+            </li>
+            <li>
+              <a href="#walk">Walk log</a>
+            </li>
+            <li>
+              <a href={REPO_URL} target="_blank" rel="noreferrer">
+                GitHub
+              </a>
+            </li>
+          </ul>
+          <a className="btn btn-dark btn-sm" href="#console">
+            Console
           </a>
         </div>
       </div>

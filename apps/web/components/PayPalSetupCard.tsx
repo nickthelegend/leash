@@ -8,37 +8,37 @@ interface PayPalSetupCardProps {
   orderId?: string;
   orderStatus?: string;
   className?: string;
+  /** light: on the paper landing; dark: inside the cobalt console. */
+  tone?: 'light' | 'dark';
 }
+
+const ENV = ['PAYPAL_CLIENT_ID', 'PAYPAL_CLIENT_SECRET', 'PAYPAL_PAYEE_MERCHANT_ID'];
 
 /**
  * Honest status of the PayPal release path. Without a captured order from the gateway this always
  * reads "Setup required": no sandbox order has run yet, and nothing here pretends otherwise.
  */
-export function PayPalSetupCard({ orderId, orderStatus, className = '' }: PayPalSetupCardProps) {
+export function PayPalSetupCard({ orderId, orderStatus, className = '', tone = 'dark' }: PayPalSetupCardProps) {
+  const light = tone === 'light';
   if (orderId) {
     return (
-      <div
-        className={`rounded-panel bg-cobalt-800 p-5 sm:p-6 text-white ring-1 ring-inset ring-cobalt-line ${className}`}
-        role="status"
-      >
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <span className="text-lg font-medium tracking-tighter2">PayPal sandbox</span>
-          <span className="inline-flex items-center gap-1.5 h-7 px-3 rounded-full bg-ok-soft text-ok text-[13px] font-medium">
-            <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" /> Order captured
+      <div className={`pp-card ${light ? 'pp-light' : 'pp-dark'} ${className}`} role="status">
+        <div className="pp-top">
+          <span className="pp-title">PayPal sandbox</span>
+          <span className="pp-pill pp-ok">
+            <CheckCircle2 aria-hidden="true" /> Order captured
           </span>
         </div>
-        <p className="mt-3 text-sm text-white/70">
-          The gateway captured a PayPal order after a verified proof in this session.
-        </p>
-        <dl className="mt-4 grid gap-2 text-sm">
-          <div className="flex justify-between gap-3 rounded-2xl bg-cobalt-700 px-4 py-3">
-            <dt className="text-white/60">Order ID</dt>
-            <dd className="mono text-sun text-[13px] text-right">{orderId}</dd>
+        <p className="pp-text">The gateway captured a PayPal order after a verified proof in this session.</p>
+        <dl className="pp-dl">
+          <div>
+            <dt>Order ID</dt>
+            <dd className="mono">{orderId}</dd>
           </div>
           {orderStatus && (
-            <div className="flex justify-between gap-3 rounded-2xl bg-cobalt-700 px-4 py-3">
-              <dt className="text-white/60">Status</dt>
-              <dd className="mono text-[13px]">{orderStatus}</dd>
+            <div>
+              <dt>Status</dt>
+              <dd className="mono">{orderStatus}</dd>
             </div>
           )}
         </dl>
@@ -47,30 +47,27 @@ export function PayPalSetupCard({ orderId, orderStatus, className = '' }: PayPal
   }
 
   return (
-    <div
-      className={`rounded-panel bg-cobalt-800 p-5 sm:p-6 text-white ring-1 ring-inset ring-sun/40 ${className}`}
-      role="note"
-      aria-label="PayPal sandbox: setup required"
-    >
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <span className="text-lg font-medium tracking-tighter2">PayPal sandbox</span>
-        <span className="inline-flex items-center gap-1.5 h-7 px-3 rounded-full bg-sun text-sun-ink text-[13px] font-medium">
-          <KeyRound className="w-3.5 h-3.5" aria-hidden="true" /> Setup required (PAYPAL_CLIENT_ID)
+    <div className={`pp-card ${light ? 'pp-light' : 'pp-dark'} ${className}`} role="note" aria-label="PayPal sandbox: setup required">
+      <div className="pp-top">
+        <span className="pp-title">PayPal rail</span>
+        <span className="pp-pill pp-setup">
+          <KeyRound aria-hidden="true" /> Setup required (PAYPAL_CLIENT_ID)
         </span>
       </div>
-      <p className="mt-3 text-sm leading-relaxed text-white/75">
-        <span className="font-medium text-white">BLOCKED.</span> Orders v2 create + capture is implemented; the
-        live sandbox run is pending credentials:
+      <p className="pp-text">
+        <b>BLOCKED, not faked.</b> Orders v2 create, approve or vault, and capture are implemented; the live sandbox
+        run waits for these keys:
       </p>
-      <div className="mt-3 flex flex-wrap gap-2">
-        <code className="mono rounded-full bg-cobalt-700 px-3 py-1.5 text-[12.5px] text-sun">PAYPAL_CLIENT_ID</code>
-        <code className="mono rounded-full bg-cobalt-700 px-3 py-1.5 text-[12.5px] text-sun">PAYPAL_CLIENT_SECRET</code>
-        <code className="mono rounded-full bg-cobalt-700 px-3 py-1.5 text-[12.5px] text-sun">PAYPAL_PAYEE_MERCHANT_ID</code>
+      <div className="pp-env">
+        {ENV.map((e) => (
+          <code key={e} className="mono">
+            {e}
+          </code>
+        ))}
       </div>
-      <p className="mt-3 text-[13px] leading-relaxed text-white/60">
-        Until they are set, proofs still verify, but the gateway answers &ldquo;Setup required&rdquo; and consumes
-        nothing. With keys: above the owner&rsquo;s approval threshold the buyer approves the order; below it a
-        vaulted wallet is charged. Paid only when the capture is COMPLETED for the proven cents.
+      <p className="pp-small">
+        Until they are set, proofs still verify but nothing is released on this rail. A payment counts as paid only
+        when PayPal reports the capture COMPLETED for exactly the proven cents.
       </p>
     </div>
   );
