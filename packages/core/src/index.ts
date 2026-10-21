@@ -8,3 +8,5 @@ export * from './policy/policy.js';
 export * from './prover/prover.js';
 export * from './verifier/service.js';
 export * from './verifier/verifier.js';
+export * from './spend/spendState.js';
+export * from './util/paths.js';

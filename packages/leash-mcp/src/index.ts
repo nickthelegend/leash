@@ -12,15 +12,69 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import {
   checkVerifierHealth,
+  currentEpoch,
   generatePaymentProof,
   getDefaultPolicy,
+  isAddress,
+  policyIdOf,
+  SpendInputs,
+  SpendTracker,
   verifyPaymentProof,
 } from '@leash/core';
 import { execFileSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 
+/** `--demo`: prove against the fixed-salt demo policy (recordings/tests only). Default: the owner's random-salt policy. */
+const DEMO = process.argv.includes('--demo') || process.env.LEASH_DEMO === '1';
+const policy = () => getDefaultPolicy({ demo: DEMO });
+
 /** Proofs made by leash_request_payment in this process, keyed by nonce, for on-chain submission. */
-const proofs = new Map<string, { proofHex: string; publicInputsHex: string; amount: number }>();
+interface StoredProof {
+  proofHex: string;
+  publicInputsHex: string;
+  amount: number;
+  spend: SpendInputs;
+  newSpendCommit: string;
+}
+const proofs = new Map<string, StoredProof>();
+const spendTracker = new SpendTracker(true);
+
+const castCall = (rpc: string, to: string, sig: string, ...args: string[]) =>
+  execFileSync('cast', ['call', to, sig, ...args, '--rpc-url', rpc], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+
+/** Owner of the policy on chain (policies are keyed by (owner, commitment)). */
+const policyOwner = () => process.env.LEASH_POLICY_OWNER_ADDRESS ?? process.env.LEASH_SENDER_ADDRESS;
+
+const spendKey = (commitment: string) => {
+  const owner = policyOwner();
+  return isAddress(owner) ? policyIdOf(owner, commitment) : commitment;
+};
+
+/**
+ * Spend-chain inputs for the next proof. With a LeashPayment contract the chain is the source of
+ * truth: today's stored commitment must be the one this device last advanced to (then we know the
+ * spent total that opens it), or zero / another day (start fresh). Without a contract, the local
+ * record is used.
+ */
+function spendInputs(commitment: string): SpendInputs {
+  const epoch = currentEpoch();
+  const rpc = process.env.LEASH_RPC_URL;
+  const contract = process.env.LEASH_PAYMENT_CONTRACT_ADDRESS;
+  const owner = policyOwner();
+  if (!rpc || !contract || !isAddress(owner)) return spendTracker.inputs(spendKey(commitment), epoch);
+  const id = policyIdOf(owner, commitment);
+  const chainCommit = castCall(rpc, contract, 'spendCommit(bytes32)(bytes32)', id).toLowerCase();
+  const chainEpoch = Number(castCall(rpc, contract, 'spendEpoch(bytes32)(uint64)', id).split(' ')[0]);
+  if (/^0x0+$/.test(chainCommit) || chainEpoch !== epoch) return { epoch, prevSpendCommit: '0', spentBeforeCents: 0 };
+  const local = spendTracker.get(id);
+  if (local && local.epoch === epoch && local.commit.toLowerCase() === chainCommit) {
+    return { epoch, prevSpendCommit: chainCommit, spentBeforeCents: local.spentCents };
+  }
+  throw new Error(
+    `Spend commitment on chain (${chainCommit}) is not one this device produced today; can't open it to prove the daily cap. Another device spent under this policy.`
+  );
+}
+
 
 /**
  * Submit a stored proof to LeashPayment.executePayment with `cast send`.
@@ -51,7 +105,7 @@ function executeOnchain(nonce: string, recipientOverride?: string): ToolResult {
   const stored = proofs.get(nonce);
   if (!stored) return fail(`No proof for nonce '${nonce}' in this session; call leash_request_payment first.`);
   const hex = stored.publicInputsHex.replace(/^0x/, '');
-  if (hex.length !== 5 * 64) return fail(`Expected 5 public inputs, got ${hex.length / 64}`);
+  if (hex.length !== 8 * 64) return fail(`Expected 8 public inputs, got ${hex.length / 64}`);
   const slot = (i: number) => '0x' + hex.slice(i * 64, (i + 1) * 64);
   const provenRecipient = '0x' + slot(4).slice(-40);
   const recipient = recipientOverride ?? provenRecipient;
@@ -60,20 +114,31 @@ function executeOnchain(nonce: string, recipientOverride?: string): ToolResult {
       'cast',
       [
         'send', contract,
-        'executePayment(address,bytes32,uint256,bytes32,bytes32,address,bytes)',
-        owner, slot(0), String(stored.amount), slot(2), slot(3), recipient, stored.proofHex,
+        'executePayment(address,bytes32,uint256,bytes32,bytes32,address,(uint64,bytes32,bytes32),bytes)',
+        owner, slot(0), String(stored.amount), slot(2), slot(3), recipient,
+        `(${BigInt(slot(5))},${slot(6)},${slot(7)})`, stored.proofHex,
         '--value', String(stored.amount), '--rpc-url', rpc, '--unlocked', '--from', sender, '--json',
       ],
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1 << 24 }
     );
     const receipt = JSON.parse(out);
-    return ok({ released: receipt.status === '0x1', txHash: receipt.transactionHash, block: Number(receipt.blockNumber), recipient, amountCents: stored.amount, amountWei: stored.amount });
+    const released = receipt.status === '0x1';
+    if (released) {
+      // The chain accepted the spend update: advance this device's record of today's total.
+      spendTracker.advance(policyIdOf(owner, slot(0)), {
+        epoch: stored.spend.epoch,
+        spentBeforeCents: stored.spend.spentBeforeCents,
+        amountCents: stored.amount,
+        newSpendCommit: stored.newSpendCommit,
+      });
+    }
+    return ok({ released, txHash: receipt.transactionHash, block: Number(receipt.blockNumber), recipient, amountCents: stored.amount, amountWei: stored.amount, spentTodayCents: stored.spend.spentBeforeCents + stored.amount });
   } catch (err) {
     // cast --json reports errors as JSON on stdout (cast 1.x), older versions on stderr.
     const e = err as { stderr?: string; stdout?: string };
     const stderr = [e.stdout, e.stderr].filter(Boolean).join('\n') || String(err);
     const reason = stderr.match(/reverted:?\s*([^,"\n]+)/i)?.[1] ?? stderr.split('\n').find((l) => l.trim()) ?? 'unknown';
-    const known: Record<string, string> = { '0x9fc3a218': 'SumcheckFailed (proof does not verify for these public inputs)' };
+    const known: Record<string, string> = { '0x9fc3a218': 'SumcheckFailed (proof rejected: it does not verify for these public inputs)' };
     const named = reason.replace(/custom error (0x[0-9a-fA-F]{8})/, (m, sel: string) => known[sel.toLowerCase()] ?? m);
     return fail(`On-chain payment REJECTED by LeashPayment: ${named.replace(/,? data: "0x[0-9a-fA-F]*"/, '').trim()}`);
   }
@@ -94,7 +159,7 @@ export const TOOLS = [
   {
     name: 'leash_request_payment',
     description:
-      'Prove a payment satisfies the policy (merchant allowlist + per-transaction cap) and verify the proof. Returns the proof and verification result, or the rule the request violated.',
+      'Prove a payment satisfies the policy (merchant allowlist with each merchant\'s bound payee, per-transaction cap, rolling daily cap) and verify the proof. Returns the proof and verification result, or the rule the request violated.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -103,7 +168,7 @@ export const TOOLS = [
         nonce: { type: 'string', description: 'Unique nonce for this payment, as a decimal integer string' },
         recipient: {
           type: 'string',
-          description: 'Payee 0x address; defaults to LEASH_RECIPIENT_ADDRESS',
+          description: 'Payee 0x address; defaults to the payee the policy lists for this merchant',
         },
       },
       required: ['merchant', 'amountCents', 'nonce'],
@@ -141,8 +206,8 @@ export async function callTool(
   try {
     switch (name) {
       case 'leash_policy': {
-        const p = getDefaultPolicy();
-        return ok({ name: p.name, policyCommitment: p.policyCommitment });
+        const p = policy();
+        return ok({ name: p.name, policyCommitment: p.policyCommitment, demoPolicy: DEMO });
       }
       case 'leash_verifier_health':
         return ok(checkVerifierHealth());
@@ -162,13 +227,16 @@ export async function callTool(
         const recipient = typeof args.recipient === 'string' ? args.recipient : undefined;
         // With a LeashPayment contract configured, prove for the EVM verifier (keccak transcript).
         const useEvmTarget = Boolean(process.env.LEASH_PAYMENT_CONTRACT_ADDRESS);
+        const p = policy();
+        const spend = spendInputs(p.policyCommitment);
 
         const proof = generatePaymentProof({
-          policy: getDefaultPolicy(),
+          policy: p,
           merchantName: merchant,
           amountCents,
           nonce,
           recipient,
+          spend,
           useEvmTarget,
         });
         const verification = verifyPaymentProof({
@@ -181,13 +249,20 @@ export async function callTool(
           useEvmTarget,
         });
         if (verification.valid) {
-          proofs.set(nonce, { proofHex: proof.proofHex, publicInputsHex: proof.publicInputsHex, amount: amountCents });
+          proofs.set(nonce, {
+            proofHex: proof.proofHex,
+            publicInputsHex: proof.publicInputsHex,
+            amount: amountCents,
+            spend,
+            newSpendCommit: proof.publicInputs.new_spend_commit,
+          });
         }
         return ok({
           approved: verification.valid,
           // publicInputs.amount is the proven amount in cents (300 = $3.00), not dollars.
           amountCents,
           units: { amount: 'cents', onchain: '1 cent settles as 1 wei on the demo chain' },
+          spentTodayBeforeCents: spend.spentBeforeCents,
           publicInputs: proof.publicInputs,
           proveMs: proof.durationMs,
           verification,

@@ -34,8 +34,10 @@ interface HarnessSummary {
 
 const BLOCKED_AT_LABEL: Record<string, string> = {
   CIRCUIT_RULE_R1: 'Rule R1 · allowlist',
-  CIRCUIT_RULE_R2: 'Rule R2 · cap',
-  GATEWAY_NONCE: 'Gateway · nonce',
+  CIRCUIT_RULE_R1_PAYEE: 'Rule R1 · bound payee',
+  CIRCUIT_RULE_R2: 'Rule R2 · per-payment cap',
+  CIRCUIT_RULE_R4_DAILY: 'Rule R4 · daily cap',
+  VERIFIER: 'Verifier',
   NONE: 'Allowed',
 };
 

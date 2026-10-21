@@ -3,7 +3,7 @@ pragma solidity ^0.8.27;
 import "./LeashPayment.t.sol";
 
 // Owner-only escrow withdraw, against the real HonkVerifier + committed proof fixture.
-contract WithdrawTest is LeashPaymentTest {
+contract WithdrawTest is LeashTestBase {
     address payable constant SINK = payable(address(0xC0FFEE));
 
     function _expectWithdrawRevert(bytes32 p, uint256 a, address payable to, string memory expected) internal {

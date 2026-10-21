@@ -9,3 +9,5 @@ cache/
 circuits/target/
 .tools/
 .demo/
+.leash/
+*.tsbuildinfo

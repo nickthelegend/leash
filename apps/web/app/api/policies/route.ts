@@ -26,12 +26,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const policy = createSpendingPolicy(
-      name,
-      Number(maxPerTxCents),
-      merchants,
-      salt
-    );
+    const policy = createSpendingPolicy({ name, maxPerTxCents: Number(maxPerTxCents), merchants, policySalt: salt });
 
     return NextResponse.json({
       success: true,

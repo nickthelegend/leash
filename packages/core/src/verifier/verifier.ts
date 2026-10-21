@@ -1,6 +1,7 @@
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import { toolPath } from '../util/paths.js';
 
 export class VerifierDependencyError extends Error {
   public readonly code = 'VERIFIER_DEPENDENCY_MISSING';
@@ -25,20 +26,31 @@ export interface VerifyProofRequest {
   expectedAmount?: number | string;
   expectedMerchantHash?: string;
   expectedNonce?: string | number;
+  expectedRecipient?: string;
   useEvmTarget?: boolean;
-  customVkPath?: string;
+  /** Internal override for tests. Never taken from an HTTP request. */
+  vkPath?: string;
 }
+
+/** The circuit's public inputs, in order (8 x 32 bytes). new_spend_commit is the circuit's return value. */
+export interface DecodedPublicInputs {
+  policy_commitment: string;
+  amount: string;
+  merchant_id_hash: string;
+  nonce: string;
+  recipient: string;
+  epoch: string;
+  prev_spend_commit: string;
+  new_spend_commit: string;
+}
+
+export const PUBLIC_INPUT_COUNT = 8;
 
 export interface VerifyProofResult {
   valid: boolean;
   error?: string;
   durationMs: number;
-  extractedPublicInputs?: {
-    policy_commitment: string;
-    amount: string;
-    merchant_id_hash: string;
-    nonce: string;
-  };
+  extractedPublicInputs?: DecodedPublicInputs;
 }
 
 export interface VerifierHealthStatus {
@@ -92,6 +104,18 @@ export function resolveCircuitsDir(): string {
   );
 }
 
+/** Absolute path of the bb binary (pinned .tools copy first, see util/paths.ts); throws if absent. */
+function resolveBb(): string {
+  const bb = toolPath('bb');
+  if (path.isAbsolute(bb)) {
+    if (!fs.existsSync(bb)) throw new Error(`bb not found at ${bb}`);
+    return bb;
+  }
+  const found = execFileSync('which', [bb], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  if (!found) throw new Error('which bb returned empty path');
+  return found;
+}
+
 /**
  * Asserts that required binaries (bb) and circuit verification keys exist.
  * FAILS LOUDLY when any dependency or key is missing. No mocks allowed.
@@ -109,13 +133,7 @@ export function assertVerifierDependencies(options?: {
   // 1. Verify bb binary on PATH
   let bbPath = '';
   try {
-    bbPath = execSync('which bb', {
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim();
-    if (!bbPath) {
-      throw new Error('which bb returned empty path');
-    }
+    bbPath = resolveBb();
   } catch {
     const errorMsg =
       "FATAL DEPENDENCY ERROR: 'bb' (Barretenberg) binary is not installed or not found on PATH. " +
@@ -190,14 +208,8 @@ export function checkVerifierHealth(): VerifierHealthStatus {
   let bbVersion = '';
   let bbAvailable = false;
   try {
-    bbPath = execSync('which bb', {
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim();
-    bbVersion = execSync('bb --version', {
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim();
+    bbPath = resolveBb();
+    bbVersion = execFileSync(bbPath, ['--version'], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
     bbAvailable = true;
   } catch {
     bbAvailable = false;
@@ -255,31 +267,23 @@ export function checkVerifierHealth(): VerifierHealthStatus {
   };
 }
 
-/**
- * Decodes the 128-byte public inputs buffer (4 * 32 bytes) into individual field elements.
- */
-export function decodePublicInputs(buffer: Buffer): {
-  policy_commitment: string;
-  amount: string;
-  merchant_id_hash: string;
-  nonce: string;
-} {
-  if (buffer.length < 128) {
-    throw new Error(
-      `Public inputs buffer must be at least 128 bytes (received ${buffer.length} bytes)`
-    );
+/** Decodes bb's public_inputs (8 x 32-byte big-endian fields) into named values. */
+export function decodePublicInputs(buffer: Buffer): DecodedPublicInputs {
+  if (buffer.length !== PUBLIC_INPUT_COUNT * 32) {
+    throw new Error(`Public inputs must be ${PUBLIC_INPUT_COUNT} x 32 bytes (received ${buffer.length} bytes)`);
   }
-
-  const p0 = buffer.subarray(0, 32);
-  const p1 = buffer.subarray(32, 64);
-  const p2 = buffer.subarray(64, 96);
-  const p3 = buffer.subarray(96, 128);
-
+  const word = (i: number) => buffer.subarray(i * 32, (i + 1) * 32).toString('hex');
+  const hex = (i: number) => `0x${word(i)}`.toLowerCase();
+  const dec = (i: number) => BigInt(`0x${word(i)}`).toString();
   return {
-    policy_commitment: `0x${p0.toString('hex')}`.toLowerCase(),
-    amount: BigInt(`0x${p1.toString('hex')}`).toString(),
-    merchant_id_hash: `0x${p2.toString('hex')}`.toLowerCase(),
-    nonce: BigInt(`0x${p3.toString('hex')}`).toString(),
+    policy_commitment: hex(0),
+    amount: dec(1),
+    merchant_id_hash: hex(2),
+    nonce: dec(3),
+    recipient: `0x${word(4).slice(-40)}`.toLowerCase(),
+    epoch: dec(5),
+    prev_spend_commit: hex(6),
+    new_spend_commit: hex(7),
   };
 }
 
@@ -299,14 +303,14 @@ export function verifyPaymentProof(
     expectedAmount,
     expectedMerchantHash,
     expectedNonce,
+    expectedRecipient,
     useEvmTarget,
-    customVkPath,
   } = req;
 
   // 1. Assert dependencies and keys exist - fails loudly if missing!
   const deps = assertVerifierDependencies({
     useEvmTarget,
-    vkPath: customVkPath,
+    vkPath: req.vkPath,
   });
 
   const proofClean = proofHex.startsWith('0x') ? proofHex.slice(2) : proofHex;
@@ -318,12 +322,7 @@ export function verifyPaymentProof(
   const pubBuffer = Buffer.from(pubClean, 'hex');
 
   // 2. Validate public input layout
-  let decoded: {
-    policy_commitment: string;
-    amount: string;
-    merchant_id_hash: string;
-    nonce: string;
-  };
+  let decoded: DecodedPublicInputs;
   try {
     decoded = decodePublicInputs(pubBuffer);
   } catch (err: any) {
@@ -383,8 +382,17 @@ export function verifyPaymentProof(
     }
   }
 
+  if (expectedRecipient !== undefined && decoded.recipient !== expectedRecipient.toLowerCase()) {
+    return {
+      valid: false,
+      error: `Public input mismatch: recipient in proof (${decoded.recipient}) does not match expected (${expectedRecipient.toLowerCase()})`,
+      durationMs: Date.now() - startTime,
+      extractedPublicInputs: decoded,
+    };
+  }
+
   // 4. Real cryptographic proof verification using Barretenberg
-  const tempId = `verify_${Date.now()}_${Math.random()
+  const tempId = `verify_${Date.now()}_${process.pid}_${Math.random()
     .toString(36)
     .slice(2, 8)}`;
   const tempProofPath = path.resolve(deps.circuitsDir, `target/${tempId}.proof`);
@@ -394,14 +402,11 @@ export function verifyPaymentProof(
     fs.writeFileSync(tempProofPath, proofBuffer);
     fs.writeFileSync(tempPubPath, pubBuffer);
 
-    const targetFlag = useEvmTarget ? '-t evm' : '';
-    const verifyCmd = `bb verify -k "${deps.vkPath}" -p "${tempProofPath}" -i "${tempPubPath}" ${targetFlag}`;
-
-    execSync(verifyCmd, {
-      cwd: deps.circuitsDir,
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    execFileSync(
+      deps.bbPath,
+      ['verify', '-k', deps.vkPath, '-p', tempProofPath, '-i', tempPubPath, ...(useEvmTarget ? ['-t', 'evm'] : [])],
+      { cwd: deps.circuitsDir, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }
+    );
 
     return {
       valid: true,

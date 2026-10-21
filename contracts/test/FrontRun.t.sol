@@ -5,7 +5,7 @@ import "./LeashPayment.t.sol";
 // Registration front-run: policies are keyed by (owner, commitment), so copying a victim's
 // commitment from the mempool only creates the copier's own empty policy.
 // The test contract plays the victim; ATTACKER copies its commitment.
-contract FrontRunTest is LeashPaymentTest {
+contract FrontRunTest is LeashTestBase {
     address payable constant SINK = payable(address(0xC0FFEE));
 
     function _reason(bytes memory r) internal pure returns (string memory) {
@@ -41,7 +41,7 @@ contract FrontRunTest is LeashPaymentTest {
         // Attacker relaying the victim's proof against its own copy cannot spend victim escrow.
         vm.prank(ATTACKER);
         (ok, r) = address(payment).call(abi.encodeCall(
-            LeashPayment.executePayment, (ATTACKER, policyCommitment, amount, merchantHash, nonce, merchant, _proof())
+            LeashPayment.executePayment, (ATTACKER, policyCommitment, amount, merchantHash, nonce, merchant, spend, _proof())
         ));
         require(!ok && _eq(_reason(r), "Insufficient policy balance"), "attacker pay from own copy");
         require(!payment.usedNonces(_id(policyCommitment), nonce), "victim nonce untouched");

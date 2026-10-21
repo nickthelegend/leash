@@ -8,11 +8,24 @@ interface Vm {
     function readFileBinary(string calldata path) external view returns (bytes memory);
     function prank(address) external;
     function deal(address, uint256) external;
+    function warp(uint256) external;
 }
 
-// Every test runs against the bb-generated HonkVerifier with a real proof from circuits/.
-// Regenerate the fixture with scripts/gen-proof-fixture.sh (see test/fixtures/README.md).
-contract LeashPaymentTest {
+/// A fixture proof's public inputs, decoded (contracts/test/fixtures/<case>/public_inputs).
+struct Fixture {
+    bytes32 commitment;
+    uint256 amount;
+    bytes32 merchantHash;
+    bytes32 nonce;
+    address payable recipient;
+    LeashPayment.SpendUpdate spend;
+    bytes proof;
+}
+
+// Every test runs against the bb-generated HonkVerifier with real proofs from circuits/.
+// Regenerate the fixtures with scripts/gen-proof-fixture.sh (see test/fixtures/README.md).
+/// Shared setup and helpers. Holds no tests, so suites that extend it don't re-run other suites' tests.
+abstract contract LeashTestBase {
     Vm constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
 
     LeashPayment payment;
@@ -24,15 +37,25 @@ contract LeashPaymentTest {
     bytes32 merchantHash;
     bytes32 nonce;
     address payable merchant;
+    LeashPayment.SpendUpdate spend;
+
+    uint256 constant EPOCH = 20747; // the fixtures' UTC day (2026-10-21)
+
+    function _fixture(string memory name) internal view returns (Fixture memory f) {
+        string memory dir = string.concat("test/fixtures/", name, "/");
+        (bytes32 c, uint256 a, bytes32 m, bytes32 n, uint256 r, uint256 e, bytes32 prev, bytes32 next) = abi.decode(
+            vm.readFileBinary(string.concat(dir, "public_inputs")),
+            (bytes32, uint256, bytes32, bytes32, uint256, uint256, bytes32, bytes32)
+        );
+        f = Fixture(c, a, m, n, payable(address(uint160(r))), LeashPayment.SpendUpdate(uint64(e), prev, next), vm.readFileBinary(string.concat(dir, "proof")));
+    }
 
     function setUp() public {
         payment = new LeashPayment(address(new HonkVerifier()));
-        uint256 recipient;
-        (policyCommitment, amount, merchantHash, nonce, recipient) = abi.decode(
-            vm.readFileBinary("test/fixtures/public_inputs"),
-            (bytes32, uint256, bytes32, bytes32, uint256)
-        );
-        merchant = payable(address(uint160(recipient)));
+        vm.warp(EPOCH * 1 days + 12 hours);
+        Fixture memory f = _fixture("base");
+        (policyCommitment, amount, merchantHash, nonce, merchant) = (f.commitment, f.amount, f.merchantHash, f.nonce, f.recipient);
+        spend = f.spend;
     }
 
     function _id(bytes32 c) internal view returns (bytes32) {
@@ -40,18 +63,18 @@ contract LeashPaymentTest {
     }
 
     function _proof() internal view returns (bytes memory) {
-        return vm.readFileBinary("test/fixtures/proof");
+        return vm.readFileBinary("test/fixtures/base/proof");
     }
 
     function _pay(uint256 value, uint256 amt, bytes32 n, address payable to, bytes memory proof) internal {
-        payment.executePayment{value: value}(address(this), policyCommitment, amt, merchantHash, n, to, proof);
+        payment.executePayment{value: value}(address(this), policyCommitment, amt, merchantHash, n, to, spend, proof);
     }
 
     // Asserts the call reverts (with `expected` when non-empty) and consumes no nonce.
     function _expectRevert(uint256 value, uint256 amt, bytes32 n, address payable to, bytes memory proof, string memory expected)
         internal
     {
-        try payment.executePayment{value: value}(address(this), policyCommitment, amt, merchantHash, n, to, proof) {
+        try payment.executePayment{value: value}(address(this), policyCommitment, amt, merchantHash, n, to, spend, proof) {
             revert("expected revert");
         } catch Error(string memory reason) {
             if (bytes(expected).length != 0) {
@@ -64,6 +87,10 @@ contract LeashPaymentTest {
         require(!payment.usedNonces(_id(policyCommitment), n), "nonce consumed on failure");
     }
 
+    receive() external payable {}
+}
+
+contract LeashPaymentTest is LeashTestBase {
     function test_policy_registration() public {
         payment.registerPolicy(policyCommitment);
         require(payment.registeredPolicies(_id(policyCommitment)), "policy not registered");
@@ -95,7 +122,7 @@ contract LeashPaymentTest {
         payment.registerPolicy(policyCommitment);
         bytes memory proof = _proof();
         _pay(amount, amount, nonce, merchant, proof);
-        try payment.executePayment{value: amount}(address(this), policyCommitment, amount, merchantHash, nonce, merchant, proof) {
+        try payment.executePayment{value: amount}(address(this), policyCommitment, amount, merchantHash, nonce, merchant, spend, proof) {
             revert("replay must fail");
         } catch Error(string memory reason) {
             require(keccak256(bytes(reason)) == keccak256("Nonce already used"), reason);
@@ -135,8 +162,6 @@ contract LeashPaymentTest {
         payment.registerPolicy(policyCommitment);
         _expectRevert(amount - 1, amount, nonce, merchant, _proof(), "msg.value must equal proven amount");
     }
-
-    receive() external payable {}
 
     // Funds deposited for another policy must not be spendable by a proof against ours.
     function test_cannot_spend_another_policys_deposit() public {

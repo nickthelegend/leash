@@ -1,13 +1,16 @@
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import { toolPath } from '../util/paths.js';
 
 export const BN254_FR_MODULUS = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 
 export interface PolicyBundle {
   merkle_root: string;
   policy_commitment: string;
+  /** leaf = pedersen(merchant_id, payee, policy_salt); 0 for empty slots */
+  leaves: string[];
   layer1: string[];
   layer2: string[];
   layer3: string[];
@@ -57,6 +60,7 @@ function parsePolicyBundleOutput(output: string): PolicyBundle {
   return {
     merkle_root: rootMatch[1].toLowerCase(),
     policy_commitment: commitmentMatch[1].toLowerCase(),
+    leaves: parseHexArray('leaves').map((h) => h.toLowerCase()),
     layer1: parseHexArray('layer1').map((h) => h.toLowerCase()),
     layer2: parseHexArray('layer2').map((h) => h.toLowerCase()),
     layer3: parseHexArray('layer3').map((h) => h.toLowerCase()),
@@ -89,62 +93,57 @@ export function resolvePolicyCircuitDir(): string {
   throw new Error(`Cannot locate policy_circuit directory. Looked in: ${candidates.join(', ')}`);
 }
 
+export interface PolicyBundleInput {
+  /** 16 merchant field ids (0 = empty slot) */
+  merchantIds: bigint[];
+  /** 16 payees (160-bit), aligned with merchantIds */
+  payees: bigint[];
+  maxPerTxCents: number;
+  dailyCapCents: number;
+  policySalt: bigint;
+  spendSalt: bigint;
+}
+
 /**
- * Executes policy_circuit to compute the Pedersen Merkle tree and commitment with 100% Noir fidelity.
+ * Executes policy_circuit to compute the salted (merchant, payee) Merkle tree and the policy
+ * commitment with the same Pedersen hashing as the payment circuit.
  */
-export function computePolicyBundle(
-  leavesBigInt: bigint[],
-  maxPerTxCents: number,
-  policySalt: bigint
-): PolicyBundle {
-  if (leavesBigInt.length !== 16) {
-    throw new Error(`Expected exactly 16 leaves, received ${leavesBigInt.length}`);
+export function computePolicyBundle(input: PolicyBundleInput): PolicyBundle {
+  const { merchantIds, payees } = input;
+  if (merchantIds.length !== 16 || payees.length !== 16) {
+    throw new Error(`Expected exactly 16 merchant ids and payees, received ${merchantIds.length}/${payees.length}`);
   }
 
   const policyCircuitDir = resolvePolicyCircuitDir();
-  const tempProverFile = path.resolve(
-    policyCircuitDir,
-    `Prover_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.toml`
-  );
-  const witnessName = `bundle_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const tag = `${Date.now()}_${process.pid}_${Math.random().toString(36).slice(2, 8)}`;
+  const tempProverFile = path.resolve(policyCircuitDir, `Prover_${tag}.toml`);
+  const witnessName = `bundle_${tag}`;
+  const arr = (xs: bigint[]) => `[${xs.map((x) => `"${x.toString()}"`).join(', ')}]`;
 
   try {
-    const tomlContent = [
-      `leaves = [${leavesBigInt.map((l) => `"${l.toString()}"`).join(', ')}]`,
-      `max_per_tx = "${maxPerTxCents}"`,
-      `policy_salt = "${policySalt.toString()}"`,
-    ].join('\n');
+    fs.writeFileSync(
+      tempProverFile,
+      [
+        `merchant_ids = ${arr(merchantIds)}`,
+        `payees = ${arr(payees)}`,
+        `max_per_tx = "${input.maxPerTxCents}"`,
+        `daily_cap = "${input.dailyCapCents}"`,
+        `policy_salt = "${input.policySalt.toString()}"`,
+        `spend_salt = "${input.spendSalt.toString()}"`,
+      ].join('\n'),
+      'utf-8'
+    );
 
-    fs.writeFileSync(tempProverFile, tomlContent, 'utf-8');
-
-    const cmd = `nargo execute --package policy_circuit --prover-name "${tempProverFile.replace(
-      /\.toml$/,
-      ''
-    )}" "${witnessName}"`;
-
-    const result = execSync(cmd, {
-      cwd: policyCircuitDir,
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    const parsed = parsePolicyBundleOutput(result);
-
-    // Clean up temporary witness file if generated
-    const targetWitness = path.resolve(policyCircuitDir, `target/${witnessName}.gz`);
-    if (fs.existsSync(targetWitness)) {
-      try {
-        fs.unlinkSync(targetWitness);
-      } catch {
-        // ignore
-      }
-    }
-
-    return parsed;
+    const result = execFileSync(
+      toolPath('nargo'),
+      ['execute', '--package', 'policy_circuit', '--prover-name', tempProverFile.replace(/\.toml$/, ''), witnessName],
+      { cwd: policyCircuitDir, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }
+    );
+    return parsePolicyBundleOutput(result);
   } finally {
-    if (fs.existsSync(tempProverFile)) {
+    for (const f of [tempProverFile, path.resolve(policyCircuitDir, `target/${witnessName}.gz`)]) {
       try {
-        fs.unlinkSync(tempProverFile);
+        fs.rmSync(f, { force: true });
       } catch {
         // ignore
       }
@@ -155,17 +154,13 @@ export function computePolicyBundle(
 /**
  * Calculates the Merkle authentication path for a leaf at index k in [0, 15].
  */
-export function getMerklePath(
-  k: number,
-  leaves: bigint[],
-  bundle: PolicyBundle
-): MerklePath {
+export function getMerklePath(k: number, merchantIds: bigint[], bundle: PolicyBundle): MerklePath {
   if (k < 0 || k >= 16) {
     throw new Error(`Leaf index ${k} out of range [0, 15]`);
   }
 
   const pathElements: string[] = [
-    leaves[k ^ 1].toString(),
+    BigInt(bundle.leaves[k ^ 1]).toString(),
     BigInt(bundle.layer1[(k >> 1) ^ 1]).toString(),
     BigInt(bundle.layer2[(k >> 2) ^ 1]).toString(),
     BigInt(bundle.layer3[(k >> 3) ^ 1]).toString(),
@@ -179,7 +174,7 @@ export function getMerklePath(
   ];
 
   return {
-    merchantId: leaves[k].toString(),
+    merchantId: merchantIds[k].toString(),
     merchantIdHash: bundle.merchant_hashes[k],
     pathElements,
     pathIndices,

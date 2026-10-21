@@ -92,12 +92,7 @@ app.post('/api/policies', (req: Request, res: Response) => {
       });
     }
 
-    const policy = createSpendingPolicy(
-      name,
-      Number(maxPerTxCents),
-      merchants,
-      salt
-    );
+    const policy = createSpendingPolicy({ name, maxPerTxCents: Number(maxPerTxCents), merchants, policySalt: salt });
     activePolicies.set(policy.policyCommitment, policy);
     registeredCommitments.add(policy.policyCommitment);
 

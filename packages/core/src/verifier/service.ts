@@ -39,9 +39,11 @@ export function createVerifierRouter(): Router {
         expectedAmount,
         expectedMerchantHash,
         expectedNonce,
+        expectedRecipient,
         useEvmTarget,
-        customVkPath,
       } = req.body || {};
+      // The verification key is fixed by the server (circuits/target); a request can't pick its own
+      // key path (that used to be possible with customVkPath).
 
       if (!proofHex || !publicInputsHex) {
         res.status(400).json({
@@ -60,8 +62,8 @@ export function createVerifierRouter(): Router {
         expectedAmount,
         expectedMerchantHash,
         expectedNonce,
+        expectedRecipient,
         useEvmTarget: Boolean(useEvmTarget),
-        customVkPath,
       });
 
       res.json({

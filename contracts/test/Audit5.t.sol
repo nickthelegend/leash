@@ -2,7 +2,7 @@
 pragma solidity ^0.8.27;
 import "./LeashPayment.t.sol";
 // Round-5 verifier attacks against the committed HonkVerifier + committed fixture.
-contract Audit5Test is LeashPaymentTest {
+contract Audit5Test is LeashTestBase {
     function test_audit_fixture_amount_is_300() public view { require(amount == 300, "amount"); }
     function test_audit_amount_5000_rejected() public {
         payment.registerPolicy(policyCommitment);
@@ -23,7 +23,7 @@ contract Audit5Test is LeashPaymentTest {
         _pay(amount, amount, nonce, merchant, _proof());
         require(merchant.balance == b + amount, "paid");
         require(payment.usedNonces(_id(policyCommitment), nonce), "nonce");
-        try payment.executePayment{value: amount}(address(this), policyCommitment, amount, merchantHash, nonce, merchant, _proof()) {
+        try payment.executePayment{value: amount}(address(this), policyCommitment, amount, merchantHash, nonce, merchant, spend, _proof()) {
             revert("replay accepted");
         } catch Error(string memory r) { require(keccak256(bytes(r)) == keccak256("Nonce already used"), r); }
     }

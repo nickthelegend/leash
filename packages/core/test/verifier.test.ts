@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { getDefaultPolicy } from '../src/policy/policy.js';
 import { generatePaymentProof } from '../src/prover/prover.js';
 import {
@@ -10,7 +13,9 @@ import {
 import { createVerifierApp } from '../src/verifier/service.js';
 
 describe('LEASH Noir Verifier Service', () => {
-  const policy = getDefaultPolicy();
+  // The --demo policy (fixed, public salt): fine for tests, never for real use.
+  const policy = getDefaultPolicy({ demo: true });
+  const OPENAI_PAYEE = '0x70997970c51812dc3a010c7d01b50e0d17dc79c8';
 
   // Pre-generate a real Noir UltraHonk proof for test assertions
   const validProof = generatePaymentProof({
@@ -18,7 +23,6 @@ describe('LEASH Noir Verifier Service', () => {
     merchantName: 'openai',
     amountCents: 300,
     nonce: '42001',
-    recipient: '0x1234567890123456789012345678901234567890',
   });
 
   describe('Dependency & Key Assertions (Fail Loudly)', () => {
@@ -42,7 +46,7 @@ describe('LEASH Noir Verifier Service', () => {
         verifyPaymentProof({
           proofHex: validProof.proofHex,
           publicInputsHex: validProof.publicInputsHex,
-          customVkPath: '/tmp/nonexistent_fake_vk_path_404',
+          vkPath: '/tmp/nonexistent_fake_vk_path_404',
         });
       }).toThrowError(VerifierKeyError);
     });
@@ -63,6 +67,28 @@ describe('LEASH Noir Verifier Service', () => {
       expect(result.durationMs).toBeGreaterThan(0);
       expect(result.extractedPublicInputs?.amount).toBe('300');
       expect(result.extractedPublicInputs?.nonce).toBe('42001');
+      // The payee bound in the proof is the payee listed for openai in the policy leaf.
+      expect(result.extractedPublicInputs?.recipient).toBe(OPENAI_PAYEE);
+      expect(result.extractedPublicInputs?.prev_spend_commit).toBe(`0x${'0'.repeat(64)}`);
+      expect(result.extractedPublicInputs?.new_spend_commit).toMatch(/^0x[0-9a-f]{64}$/);
+    });
+
+    it('rejects verification if the expected recipient differs from the proven payee', () => {
+      const result = verifyPaymentProof({
+        proofHex: validProof.proofHex,
+        publicInputsHex: validProof.publicInputsHex,
+        expectedRecipient: '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC',
+      });
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain('Public input mismatch: recipient');
+    });
+
+    it('rejects public inputs whose recipient slot was swapped (bb verify fails)', () => {
+      const pub = Buffer.from(validProof.publicInputsHex.slice(2), 'hex');
+      Buffer.from('3C44CdDdB6a900fa2b585dd299e03d12FA4293BC', 'hex').copy(pub, 4 * 32 + 12);
+      const result = verifyPaymentProof({ proofHex: validProof.proofHex, publicInputsHex: `0x${pub.toString('hex')}` });
+      expect(result.valid).toBe(false);
+      expect(result.error).toContain('Barretenberg verification failed');
     });
 
     it('rejects verification if expected amount does not match public inputs', () => {
@@ -158,7 +184,7 @@ describe('LEASH Noir Verifier Service', () => {
       }
     });
 
-    it('POST /verify FAILS LOUDLY with 503 when custom key is missing', async () => {
+    it('POST /verify ignores a client-supplied key path (customVkPath is not an HTTP option)', async () => {
       const server = app.listen(0);
       const port = (server.address() as any).port;
       try {
@@ -168,8 +194,30 @@ describe('LEASH Noir Verifier Service', () => {
           body: JSON.stringify({
             proofHex: validProof.proofHex,
             publicInputsHex: validProof.publicInputsHex,
-            customVkPath: '/tmp/nonexistent_verification_key_file',
+            customVkPath: '/tmp/attacker_chosen_vk',
+            vkPath: '/tmp/attacker_chosen_vk',
           }),
+        });
+        expect(res.status).toBe(200);
+        const data = await res.json();
+        expect(data.valid).toBe(true);
+      } finally {
+        server.close();
+      }
+    });
+
+    it('POST /verify FAILS LOUDLY with 503 when the server has no verification key', async () => {
+      const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'leash-novk-'));
+      fs.writeFileSync(path.join(empty, 'Nargo.toml'), '[package]\nname = "x"\ntype = "bin"\n');
+      const prev = process.env.LEASH_CIRCUITS_DIR;
+      process.env.LEASH_CIRCUITS_DIR = empty;
+      const server = app.listen(0);
+      const port = (server.address() as any).port;
+      try {
+        const res = await fetch(`http://localhost:${port}/verify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ proofHex: validProof.proofHex, publicInputsHex: validProof.publicInputsHex }),
         });
         expect(res.status).toBe(503);
         const data = await res.json();
@@ -177,6 +225,9 @@ describe('LEASH Noir Verifier Service', () => {
         expect(data.errorType).toBe('VERIFIER_KEY_MISSING');
       } finally {
         server.close();
+        if (prev === undefined) delete process.env.LEASH_CIRCUITS_DIR;
+        else process.env.LEASH_CIRCUITS_DIR = prev;
+        fs.rmSync(empty, { recursive: true, force: true });
       }
     });
   });
