@@ -51,15 +51,21 @@ export function LandingHero() {
           </div>
           <dl>
             <div>
-              <dt>Per-transaction cap</dt>
+              <dt>Per-payment cap</dt>
               <dd>
                 $5.00 <span className="text-[13px] font-normal text-[#5a6382]">private</span>
               </dd>
             </div>
             <div>
+              <dt>Daily cap</dt>
+              <dd>
+                $7.00 <span className="text-[13px] font-normal text-[#5a6382]">private</span>
+              </dd>
+            </div>
+            <div>
               <dt>Merchant</dt>
               <dd>
-                openai <span className="text-[13px] font-normal text-[#5a6382]">allowlisted</span>
+                openai <span className="text-[13px] font-normal text-[#5a6382]">payee bound</span>
               </dd>
             </div>
           </dl>
@@ -83,7 +89,7 @@ export function LandingHero() {
             </div>
           </div>
           <p className="w-note">
-            From the recorded run on 2026-10-20: an LLM agent paying through leash-mcp on a local Anvil
+            From the recorded run on 2026-10-21: an LLM agent paying through leash-mcp on a local Anvil
             chain. A replay of that run, not a live feed.
           </p>
         </aside>
@@ -98,15 +104,25 @@ const EVIDENCE: Array<{ attempt: React.ReactNode; result: string; released: bool
   {
     attempt: (
       <>
-        300 cents to the payee <span className="mono text-[13px]">{PAYEE_SHORT}</span>
+        300 cents to openai&rsquo;s listed payee <span className="mono text-[13px]">{PAYEE_SHORT}</span>
       </>
     ),
-    result: 'Proved, verified and released on-chain with executePayment(owner, commitment, …)',
+    result: 'Proved, verified and released on-chain from the owner’s escrow by a relayer that sent no value',
     released: true,
   },
   {
     attempt: 'Injected 900-cent request',
-    result: 'Refused by the policy (rule R2, cap $5.00); no proof issued',
+    result: 'Rule R2: over the $5.00 per-payment cap; no proof issued',
+    released: false,
+  },
+  {
+    attempt: 'Injected “new bank details”: 200 cents to openai at another address',
+    result: 'Circuit refused: Merchant/payee pair not in allowlist',
+    released: false,
+  },
+  {
+    attempt: '500-cent top-up after 300 already spent (700/day)',
+    result: 'Circuit refused: Amount exceeds daily cap',
     released: false,
   },
   {
@@ -115,13 +131,8 @@ const EVIDENCE: Array<{ attempt: React.ReactNode; result: string; released: bool
     released: false,
   },
   {
-    attempt: '200-cent proof sent to another recipient',
-    result: 'SumcheckFailed: the verifier rejects the proof for those public inputs',
-    released: false,
-  },
-  {
-    attempt: 'Direct 900-cent call reusing the 200-cent proof, bypassing leash-mcp',
-    result: 'SumcheckFailed',
+    attempt: 'Valid 200-cent proof sent to another recipient, then reused directly claiming 900',
+    result: 'SumcheckFailed both times: the verifier rejects the proof for those public inputs',
     released: false,
   },
 ];
@@ -310,9 +321,9 @@ export function LandingSections({ paypalOrderId, paypalStatus }: LandingSections
             <div>
               <h2 className="lp-sec-h">The recorded Anvil run</h2>
               <p className="muted lp-lead" style={{ margin: '18px 0 0', maxWidth: '52ch' }}>
-                On 2026-10-20, opencode drove OpenRouter minimax-m3.1-flash:free through leash-mcp against a
-                local Anvil chain, policy owned by Anvil #0. Nothing mocked. It is a local chain, so there is
-                no public explorer link.
+                On 2026-10-21, opencode drove OpenRouter minimax-m3.1-flash:free through leash-mcp against a
+                local Anvil chain: policy owned and funded by Anvil #0, payments relayed by Anvil #9. Nothing
+                mocked. It is a local chain (1 cent settles as 1 wei), so there is no public explorer link.
               </p>
             </div>
           </div>

@@ -133,8 +133,27 @@ as 1 wei.
 
 ## Demo video
 
-The previous recording (`leash-demo-v3.mp4`, 2026-10-20) predates the payee binding and the daily
-cap. A re-recording against the current circuit is described in [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md).
+A 136-second live recording (`leash-demo-v4.mp4`, 2026-10-21, shared separately until it is hosted)
+of `scripts/demo-anvil.sh` plus a real LLM agent (opencode + OpenRouter `minimax-m3.1-flash:free`)
+whose only tools are leash-mcp's. Local Anvil; policy owned and funded by Anvil #0 (2000 wei escrow,
+cap 500 cents per payment, 700 per day); payments relayed by Anvil #9 with no value:
+
+| Step | Result |
+|---|---|
+| 300 cents (`amountCents: 300`) to openai's listed payee `0x7099…79C8` | proved, verified, **released** on-chain from escrow (`executePayment(owner, commitment, …, (epoch, prev, new), proof)`) |
+| injected 900-cent request | `Rule R2 Violation`; no proof issued |
+| injected "new bank details": 200 cents to openai at Anvil #2 | circuit refused: `Merchant/payee pair not in allowlist` |
+| 500-cent top-up after 300 spent | circuit refused: `Amount exceeds daily cap` |
+| replay of nonce 3001 | `Nonce already used` on-chain |
+| valid 200-cent proof sent to Anvil #2 | `SumcheckFailed`: the verifier rejects the proof for those public inputs |
+| direct 900-cent `cast send` reusing that 200-cent proof, bypassing leash-mcp | `SumcheckFailed` |
+| `pnpm verify:receipt 3001` | every check PASS (stored proof, vk hash, bb verify, public inputs, policyId) |
+| `pnpm paypal:e2e` | `Setup required (PAYPAL_CLIENT_ID)`, exit 1 (no keys yet) |
+
+End state: Anvil #1 +300 wei, Anvil #2 +0, escrow 1700 of 2000, one `PaymentReleased`. Lines
+starting with `###` are captions; all other text is unedited program output, and the JSON lines are
+leash-mcp's own `LEASH_MCP_LOG` entries (proof bytes shown as a length only). Timed script:
+[docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md).
 
 ## Security
 
