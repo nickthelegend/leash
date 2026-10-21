@@ -62,9 +62,9 @@ describe('PayGateway (verify-only, real bb)', () => {
   });
 
   it('registers public data only', () => {
-    const reg = gw.register({ owner: OWNER, policyCommitment: policy.policyCommitment, approvalThresholdCents: 200 });
+    const reg = gw.register({ owner: OWNER, policyCommitment: policy.policyCommitment, approvalThresholdCents: 200 }, { trustedOwnerDevice: true });
     expect(reg.policyId).toBe(policyId);
-    expect(Object.keys(reg).sort()).toEqual(['approvalThresholdCents', 'createdAt', 'owner', 'policyCommitment', 'policyId', 'vaultId'].sort());
+    expect(Object.keys(reg).sort()).toEqual(['approvalThresholdCents', 'createdAt', 'owner', 'policyCommitment', 'policyId', 'vaultId', 'version'].sort());
   });
 
   it('verified proof + no PayPal keys: 503 Setup required (PAYPAL_CLIENT_ID), nothing consumed', async () => {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { paypalService, sharedGateway } from '@leash/core';
-import { errorResponse, publicBaseUrl } from '@/lib/server';
+import { errorResponse, ownerDeviceOnly, publicBaseUrl } from '@/lib/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -14,8 +14,13 @@ export async function GET() {
  *   { action: 'setup' }                                         -> approve link for the owner
  *   { action: 'confirm', setupTokenId, owner, policyCommitment,
  *     approvalThresholdCents }                                  -> payment token stored as the policy's vault_id
+ * Owner device only: storing a vault id and threshold decides whether payments are charged without
+ * the buyer, so a verify-only deployment refuses it (remote owners use the gateway's signed
+ * POST /api/policies instead).
  */
 export async function POST(req: NextRequest) {
+  const blocked = ownerDeviceOnly();
+  if (blocked) return blocked;
   try {
     const body = await req.json();
     const setup = paypalService.setupStatus();
@@ -27,12 +32,15 @@ export async function POST(req: NextRequest) {
     }
     if (body.action === 'confirm') {
       const { vaultId } = await paypalService.createVaultPaymentToken(String(body.setupTokenId ?? ''));
-      const policy = sharedGateway().register({
-        owner: body.owner,
-        policyCommitment: body.policyCommitment,
-        approvalThresholdCents: Number(body.approvalThresholdCents ?? 0),
-        vaultId,
-      });
+      const policy = sharedGateway().register(
+        {
+          owner: body.owner,
+          policyCommitment: body.policyCommitment,
+          approvalThresholdCents: Number(body.approvalThresholdCents ?? 0),
+          vaultId,
+        },
+        { trustedOwnerDevice: true }
+      );
       return NextResponse.json({ success: true, policy });
     }
     return NextResponse.json({ success: false, error: "action must be 'setup' or 'confirm'" }, { status: 400 });

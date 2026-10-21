@@ -4,7 +4,8 @@ import express, { Express, Request, Response } from 'express';
 import path from 'path';
 import { paypalService } from '../paypal/paypal.js';
 import { createVerifierRouter } from '../verifier/service.js';
-import { GatewayError, PayGateway, sharedGateway } from './payGateway.js';
+import { policyIdOf } from '../crypto/evm.js';
+import { GatewayError, PayGateway, registrationMessage, sharedGateway } from './payGateway.js';
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
 dotenv.config();
@@ -15,7 +16,10 @@ dotenv.config();
  *   GET  /health, /api/verify/health   verifier diagnostics
  *   POST /verify, /api/verify          bb verify against the server's own key
  *   GET  /api/policies                 public registrations (owner, commitment, threshold)
- *   POST /api/policies                 register { owner, policyCommitment, approvalThresholdCents }
+ *   GET  /api/policies/message         ?owner&policyCommitment&approvalThresholdCents[&vaultId]: the text
+ *                                      the owner signs (EIP-191) and the next version
+ *   POST /api/policies                 register / change { owner, policyCommitment, approvalThresholdCents,
+ *                                      vaultId?, version, signature } (owner-signed; 401 without)
  *   GET  /api/spend/:policyId          latest spend commitment (the total stays hidden)
  *   GET  /api/receipts[/:nonce]        receipts (?policyId= to pick one policy)
  * Payments are released by the Next.js app's /api/pay, which uses the same PayGateway.
@@ -42,12 +46,29 @@ export function createGatewayApp(gateway: PayGateway = sharedGateway()): Express
     res.json({ policies: gateway.policies() });
   });
 
+  // What the owner must sign for a registration or threshold change (no secret involved).
+  app.get('/api/policies/message', (req: Request, res: Response) => {
+    try {
+      const q = req.query as Record<string, string | undefined>;
+      const policyId = policyIdOf(String(q.owner ?? ''), String(q.policyCommitment ?? ''));
+      const prev = gateway.policy(policyId);
+      const approvalThresholdCents = Number(q.approvalThresholdCents ?? 0);
+      const version = (prev?.version ?? 0) + 1;
+      const vaultId = q.vaultId ?? prev?.vaultId;
+      res.json({ policyId, version, message: registrationMessage({ policyId, approvalThresholdCents, vaultId, version }) });
+    } catch (err) {
+      res.status(400).json({ success: false, error: (err as Error).message });
+    }
+  });
+
+  // Owner-signed only: the threshold decides whether a vaulted wallet is charged without the buyer.
   app.post('/api/policies', (req: Request, res: Response) => {
     try {
-      const { owner, policyCommitment, approvalThresholdCents, vaultId } = req.body ?? {};
-      res.json({ success: true, policy: gateway.register({ owner, policyCommitment, approvalThresholdCents, vaultId }) });
-    } catch (err: any) {
-      res.status(err instanceof GatewayError ? err.status : 400).json({ success: false, error: err.message });
+      const { owner, policyCommitment, approvalThresholdCents, vaultId, version, signature } = req.body ?? {};
+      res.json({ success: true, policy: gateway.register({ owner, policyCommitment, approvalThresholdCents, vaultId, version, signature }) });
+    } catch (err) {
+      const e = err as GatewayError;
+      res.status(err instanceof GatewayError ? e.status : 400).json({ success: false, error: e.message, ...(err instanceof GatewayError ? e.extra : {}) });
     }
   });
 

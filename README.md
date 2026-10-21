@@ -188,6 +188,13 @@ leash-mcp's own `LEASH_MCP_LOG` entries (proof bytes shown as a length only). Ti
 - **Payee binding.** Each allowlist leaf commits to the merchant's payee, so an injected "pay openai,
   but to this new address" can't be proven at all (nargo test
   `test_allowlisted_merchant_attacker_payee_fails`, `PayeeBinding.t.sol`).
+- **Owner-signed gateway registration.** The PayPal approval threshold decides whether a vaulted
+  wallet is charged without the buyer, so the gateway's `POST /api/policies` only accepts a
+  registration or threshold / vault-id change signed by the policy owner (EIP-191 over
+  `registrationMessage`: policyId, threshold, vault id and a version that must increase, so an old
+  signed registration can't be replayed). `GET /api/policies/message` returns the text to sign
+  (`cast wallet sign` or any wallet). Only the console's own owner-device routes register in-process
+  without one (`registration.test.ts`, including `cast wallet verify` on the same signature).
 - **Daily cap without double-spend.** `LeashPayment` (and the gateway) store the latest spend
   commitment per policy and accept only a proof whose `prevCommit` matches it, so two proofs built on
   the same running total can't both land (`DailyCap.t.sol`).
@@ -203,8 +210,6 @@ pure request-body/assertion tests plus one live sandbox test that is skipped wit
 - **No PayPal sandbox order has run yet** (BLOCKED on sandbox credentials). The PayPal path is
   implemented and unit-tested, not proven live.
 - The EVM rail has run on local Anvil only; leash-mcp's on-chain tool refuses any chain id but 31337.
-- The local gateway does not authenticate who registers a policy or sets its threshold (on chain,
-  registration is bound to `msg.sender`).
 - The proxy's amount check knows the `@paypal/agent-toolkit` `create_order` shape (items, tax,
   shipping, discount, USD). The toolkit charges the account behind `PAYPAL_ACCESS_TOKEN`; the proxy
   flags a mismatch only when the upstream response includes `payee.merchant_id`.

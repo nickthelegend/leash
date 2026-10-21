@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { recoverEip191Signer } from '../crypto/eip191.js';
 import { isAddress, paypalPayee, PAYPAL_MERCHANT_ID_RE, policyIdOf } from '../crypto/evm.js';
 import { leashCustomId, PayPalService, PayPalSetupRequired, paypalService } from '../paypal/paypal.js';
 import { currentEpoch } from '../spend/spendState.js';
@@ -20,7 +21,31 @@ export interface GatewayPolicy {
   approvalThresholdCents: number;
   /** PayPal Vault v3 payment token the owner approved once; enables agent-mode capture. */
   vaultId?: string;
+  /** Registration version: every change needs a higher one, so an old signed registration can't be replayed. */
+  version: number;
   createdAt: string;
+}
+
+export interface RegistrationInput {
+  owner: string;
+  policyCommitment: string;
+  approvalThresholdCents?: number;
+  vaultId?: string;
+}
+
+/**
+ * The exact text the owner signs (EIP-191 personal_sign) to register a policy or change its approval
+ * threshold or vault id at a gateway. It names the policyId (owner + commitment), every field the
+ * registration sets, and a version that must increase with each change.
+ */
+export function registrationMessage(r: { policyId: string; approvalThresholdCents: number; vaultId?: string; version: number }): string {
+  return [
+    'LEASH gateway registration',
+    `policyId: ${r.policyId.toLowerCase()}`,
+    `approvalThresholdCents: ${r.approvalThresholdCents}`,
+    `vaultId: ${r.vaultId ?? 'none'}`,
+    `version: ${r.version}`,
+  ].join('\n');
 }
 
 interface SpendRecord {
@@ -73,23 +98,57 @@ export class PayGateway {
   }
 
   /**
-   * Register (or update the threshold / vault id of) a policy. Note: this local gateway does not
-   * authenticate the owner; on chain, registration is bound to msg.sender.
+   * Register (or change the threshold / vault id of) a policy. The approval threshold decides whether
+   * a vaulted PayPal wallet is charged without the buyer, so a change must come from the owner:
+   *  - over the network: `signature` is the owner's EIP-191 signature of registrationMessage(...) and
+   *    `version` is higher than the stored one (replays of an older registration are refused);
+   *  - in-process on the owner device (the console's own routes): `{ trustedOwnerDevice: true }`.
+   * Without either it throws 401. On chain, registration is bound to msg.sender instead.
    */
-  register(input: { owner: string; policyCommitment: string; approvalThresholdCents?: number; vaultId?: string }): GatewayPolicy {
+  register(
+    input: RegistrationInput & { signature?: string; version?: number },
+    opts: { trustedOwnerDevice?: boolean } = {}
+  ): GatewayPolicy {
     if (!isAddress(input.owner)) throw new GatewayError(400, 'owner must be a 0x-prefixed 20-byte address');
     if (!/^0x[0-9a-fA-F]{64}$/.test(input.policyCommitment)) throw new GatewayError(400, 'policyCommitment must be 0x + 64 hex');
     const threshold = input.approvalThresholdCents ?? 0;
     if (!Number.isInteger(threshold) || threshold < 0) throw new GatewayError(400, 'approvalThresholdCents must be a non-negative integer');
+    if (input.vaultId !== undefined && !/^[0-9a-zA-Z_-]{1,255}$/.test(input.vaultId)) throw new GatewayError(400, 'vaultId must match ^[0-9a-zA-Z_-]{1,255}$');
     const policyId = policyIdOf(input.owner, input.policyCommitment);
     const all = this.readJson<Record<string, GatewayPolicy>>('policies.json', {});
     const prev = all[policyId];
+    const vaultId = input.vaultId ?? prev?.vaultId;
+    const prevVersion = prev?.version ?? 0;
+    let version: number;
+    if (opts.trustedOwnerDevice) {
+      version = prevVersion + 1;
+    } else {
+      if (!input.signature) {
+        throw new GatewayError(401, 'Owner signature required: sign registrationMessage(...) with the owner key (EIP-191)', {
+          message: registrationMessage({ policyId, approvalThresholdCents: threshold, vaultId, version: prevVersion + 1 }),
+        });
+      }
+      version = Number(input.version);
+      if (!Number.isInteger(version) || version <= prevVersion) {
+        throw new GatewayError(409, `version must be an integer above ${prevVersion} (the stored registration)`, { currentVersion: prevVersion });
+      }
+      let signer: string;
+      try {
+        signer = recoverEip191Signer(registrationMessage({ policyId, approvalThresholdCents: threshold, vaultId, version }), input.signature);
+      } catch (e) {
+        throw new GatewayError(400, `Bad signature: ${(e as Error).message}`);
+      }
+      if (signer !== input.owner.toLowerCase()) {
+        throw new GatewayError(401, 'Signature is not from the policy owner');
+      }
+    }
     all[policyId] = {
       policyId,
       owner: input.owner.toLowerCase(),
       policyCommitment: input.policyCommitment.toLowerCase(),
       approvalThresholdCents: threshold,
-      vaultId: input.vaultId ?? prev?.vaultId,
+      vaultId,
+      version,
       createdAt: prev?.createdAt ?? new Date().toISOString(),
     };
     this.writeJson('policies.json', all);

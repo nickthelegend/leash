@@ -1,3 +1,4 @@
+export * from './crypto/eip191.js';
 export * from './crypto/evm.js';
 export * from './crypto/hasher.js';
 export * from './gateway/payGateway.js';

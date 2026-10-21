@@ -37,11 +37,11 @@ export async function POST(req: NextRequest) {
       dailyCapCents: dailyCapCents ? Number(dailyCapCents) : undefined,
       merchants: list,
     });
-    const registration = sharedGateway().register({
-      owner: consoleOwner(),
-      policyCommitment: policy.policyCommitment,
-      approvalThresholdCents: Number(approvalThresholdCents ?? 300),
-    });
+    // In-process on the owner device (this route is owner-device only), so no network signature.
+    const registration = sharedGateway().register(
+      { owner: consoleOwner(), policyCommitment: policy.policyCommitment, approvalThresholdCents: Number(approvalThresholdCents ?? 300) },
+      { trustedOwnerDevice: true }
+    );
     return NextResponse.json({ success: true, policy, registration });
   } catch (err) {
     return errorResponse(err);
