@@ -27,6 +27,7 @@ import {
 } from '@leash/core';
 import { execFileSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
+import { createProxyServer, ProofGatedProxy, splitCommand } from './proxy.js';
 
 /** `--demo`: prove against the fixed-salt demo policy (recordings/tests only). Default: the owner's random-salt policy. */
 const DEMO = process.argv.includes('--demo') || process.env.LEASH_DEMO === '1';
@@ -476,11 +477,34 @@ export function createServer(): Server {
   return server;
 }
 
+async function main(): Promise<void> {
+  const i = process.argv.indexOf('--upstream');
+  if (i < 0) {
+    await createServer().connect(new StdioServerTransport());
+    return;
+  }
+  // Proof-gated proxy mode: leash-mcp --upstream "npx -y @paypal/mcp --tools=all"
+  const upstream = splitCommand(process.argv[i + 1] ?? '');
+  // PayPal's server needs a bearer token (PAYPAL_ACCESS_TOKEN, PAYPAL_ENVIRONMENT=SANDBOX); don't start
+  // a proxy that can only fail later.
+  if (upstream.some((a) => a.startsWith('@paypal/mcp')) && !process.env.PAYPAL_ACCESS_TOKEN) {
+    console.error('[leash-mcp] Setup required (PAYPAL_ACCESS_TOKEN) for the @paypal/mcp upstream');
+    process.exit(1);
+  }
+  const p = policy();
+  const owner = policyOwner();
+  const proxy = new ProofGatedProxy({
+    upstream,
+    policy: p,
+    policyId: policyIdOf(isAddress(owner) ? owner : '0x0000000000000000000000000000000000000000', p.policyCommitment),
+  });
+  await proxy.connect();
+  await createProxyServer(proxy).connect(new StdioServerTransport());
+}
+
 if (require.main === module) {
-  createServer()
-    .connect(new StdioServerTransport())
-    .catch((err) => {
-      console.error('[leash-mcp] failed to start:', err);
-      process.exit(1);
-    });
+  main().catch((err) => {
+    console.error('[leash-mcp] failed to start:', err);
+    process.exit(1);
+  });
 }

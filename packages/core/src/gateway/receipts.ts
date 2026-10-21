@@ -23,7 +23,8 @@ export interface Receipt {
   /** 'default' (bb verify off-chain) or 'evm' (keccak transcript, LeashPayment) */
   proofTarget: 'default' | 'evm';
   rail: 'paypal' | 'evm';
-  status: 'AWAITING_APPROVAL' | 'COMPLETED' | 'FAILED';
+  /** FORWARDED: the leash-mcp proxy forwarded a proven call upstream that reported no order status. */
+  status: 'AWAITING_APPROVAL' | 'COMPLETED' | 'FAILED' | 'FORWARDED';
   paypalOrderId?: string;
   captureId?: string;
   /** keccak256(abi.encode(policyId, nonce)), sent to PayPal as purchase_units[0].custom_id */
