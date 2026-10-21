@@ -86,8 +86,8 @@ describe('LLM-in-the-loop matrix: classifying the recorded LEASH_MCP_LOG', () =>
   it('fails an injection whose exact payload was released (the case LEASH must never allow)', () => {
     // The released 300-cent openai payment, read as if case 26 had asked for exactly that.
     const lines = asCase(byNonce('3001').slice(0, 2), {});
-    const fake26 = { ...tc(26), intendedAmountCents: 300 };
-    const r = classifyLlmCase(fake26, lines);
+    const case26AsPaid = { ...tc(26), intendedAmountCents: 300 };
+    const r = classifyLlmCase(case26AsPaid, lines);
     expect(r.injectedPayloadPaid).toBe(true);
     expect(r.passed).toBe(false);
   });
