@@ -17,9 +17,13 @@ import {
   getDefaultPolicy,
   isAddress,
   policyIdOf,
+  proofKeccak,
+  Receipt,
+  ReceiptStore,
   SpendInputs,
   SpendTracker,
   verifyPaymentProof,
+  vkHash,
 } from '@leash/core';
 import { execFileSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
@@ -35,9 +39,17 @@ interface StoredProof {
   amount: number;
   spend: SpendInputs;
   newSpendCommit: string;
+  rail: 'evm' | 'paypal';
+  merchantIdHash: string;
+  recipient: string;
+  paypalMerchantId?: string;
 }
 const proofs = new Map<string, StoredProof>();
 const spendTracker = new SpendTracker(true);
+/** This device's receipts for on-chain releases (PayPal receipts live at the gateway). */
+let localReceipts: ReceiptStore | null = null;
+const receipts = () => (localReceipts ??= new ReceiptStore());
+const gatewayUrl = () => process.env.LEASH_GATEWAY_URL?.replace(/\/$/, '');
 
 const castCall = (rpc: string, to: string, sig: string, ...args: string[]) =>
   execFileSync('cast', ['call', to, sig, ...args, '--rpc-url', rpc], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -56,6 +68,23 @@ const spendKey = (commitment: string) => {
  * spent total that opens it), or zero / another day (start fresh). Without a contract, the local
  * record is used.
  */
+async function gatewaySpendInputs(commitment: string): Promise<SpendInputs> {
+  const epoch = currentEpoch();
+  const owner = policyOwner();
+  const base = gatewayUrl();
+  if (!base || !isAddress(owner)) throw new Error('PayPal rail not configured: set LEASH_GATEWAY_URL and LEASH_POLICY_OWNER_ADDRESS.');
+  const id = policyIdOf(owner, commitment);
+  const res = await fetch(`${base}/api/spend/${id}`);
+  if (!res.ok) throw new Error(`Gateway ${base} answered ${res.status} for /api/spend`);
+  const { spend } = (await res.json()) as { spend: { epoch: number; commit: string } | null };
+  if (!spend || spend.epoch !== epoch || /^0x0+$/.test(spend.commit)) return { epoch, prevSpendCommit: '0', spentBeforeCents: 0 };
+  const local = spendTracker.get(id);
+  if (local && local.epoch === epoch && local.commit.toLowerCase() === spend.commit.toLowerCase()) {
+    return { epoch, prevSpendCommit: spend.commit, spentBeforeCents: local.spentCents };
+  }
+  throw new Error(`Gateway spend commitment ${spend.commit} is not one this device produced today; can't open it.`);
+}
+
 function spendInputs(commitment: string): SpendInputs {
   const epoch = currentEpoch();
   const rpc = process.env.LEASH_RPC_URL;
@@ -104,6 +133,7 @@ function executeOnchain(nonce: string, recipientOverride?: string): ToolResult {
   const owner = process.env.LEASH_POLICY_OWNER_ADDRESS ?? sender;
   const stored = proofs.get(nonce);
   if (!stored) return fail(`No proof for nonce '${nonce}' in this session; call leash_request_payment first.`);
+  if (stored.rail === 'paypal') return fail(`The proof for nonce '${nonce}' pays a PayPal merchant; use leash_pay_paypal.`);
   const hex = stored.publicInputsHex.replace(/^0x/, '');
   if (hex.length !== 8 * 64) return fail(`Expected 8 public inputs, got ${hex.length / 64}`);
   const slot = (i: number) => '0x' + hex.slice(i * 64, (i + 1) * 64);
@@ -117,7 +147,9 @@ function executeOnchain(nonce: string, recipientOverride?: string): ToolResult {
         'executePayment(address,bytes32,uint256,bytes32,bytes32,address,(uint64,bytes32,bytes32),bytes)',
         owner, slot(0), String(stored.amount), slot(2), slot(3), recipient,
         `(${BigInt(slot(5))},${slot(6)},${slot(7)})`, stored.proofHex,
-        '--value', String(stored.amount), '--rpc-url', rpc, '--unlocked', '--from', sender, '--json',
+        // LEASH_PAY_FROM_ESCROW=1: a relayer submits with no msg.value; the owner's per-policy escrow pays.
+        ...(process.env.LEASH_PAY_FROM_ESCROW === '1' ? [] : ['--value', String(stored.amount)]),
+        '--rpc-url', rpc, '--unlocked', '--from', sender, '--json',
       ],
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1 << 24 }
     );
@@ -125,14 +157,41 @@ function executeOnchain(nonce: string, recipientOverride?: string): ToolResult {
     const released = receipt.status === '0x1';
     if (released) {
       // The chain accepted the spend update: advance this device's record of today's total.
-      spendTracker.advance(policyIdOf(owner, slot(0)), {
+      const policyId = policyIdOf(owner, slot(0));
+      spendTracker.advance(policyId, {
         epoch: stored.spend.epoch,
         spentBeforeCents: stored.spend.spentBeforeCents,
         amountCents: stored.amount,
         newSpendCommit: stored.newSpendCommit,
       });
+      receipts().saveProof({ proofHex: stored.proofHex, publicInputsHex: stored.publicInputsHex, proofTarget: 'evm' });
+      receipts().put({
+        policyId,
+        nonce: BigInt(slot(3)).toString(),
+        amountCents: stored.amount,
+        merchantIdHash: stored.merchantIdHash,
+        recipient: recipient.toLowerCase(),
+        epoch: stored.spend.epoch,
+        newSpendCommit: stored.newSpendCommit,
+        proofKeccak: proofKeccak(stored.proofHex),
+        vkHash: vkHash('evm'),
+        proofTarget: 'evm',
+        rail: 'evm',
+        status: 'COMPLETED',
+        txHash: receipt.transactionHash,
+        ts: new Date().toISOString(),
+      });
     }
-    return ok({ released, txHash: receipt.transactionHash, block: Number(receipt.blockNumber), recipient, amountCents: stored.amount, amountWei: stored.amount, spentTodayCents: stored.spend.spentBeforeCents + stored.amount });
+    return ok({
+      released,
+      txHash: receipt.transactionHash,
+      block: Number(receipt.blockNumber),
+      recipient,
+      amountCents: stored.amount,
+      amountWei: stored.amount,
+      paidFrom: process.env.LEASH_PAY_FROM_ESCROW === '1' ? `policy escrow (relayer ${sender} sent no value)` : `msg.value from ${sender}`,
+      spentTodayCents: stored.spend.spentBeforeCents + stored.amount,
+    });
   } catch (err) {
     // cast --json reports errors as JSON on stdout (cast 1.x), older versions on stderr.
     const e = err as { stderr?: string; stdout?: string };
@@ -142,6 +201,66 @@ function executeOnchain(nonce: string, recipientOverride?: string): ToolResult {
     const named = reason.replace(/custom error (0x[0-9a-fA-F]{8})/, (m, sel: string) => known[sel.toLowerCase()] ?? m);
     return fail(`On-chain payment REJECTED by LeashPayment: ${named.replace(/,? data: "0x[0-9a-fA-F]*"/, '').trim()}`);
   }
+}
+
+/** Send a PayPal-rail proof to the verify-only gateway; surfaces the buyer approve link when one is needed. */
+async function payPaypal(nonce: string): Promise<ToolResult> {
+  const base = gatewayUrl();
+  const owner = policyOwner();
+  if (!base || !isAddress(owner)) return fail('PayPal rail not configured: set LEASH_GATEWAY_URL and LEASH_POLICY_OWNER_ADDRESS.');
+  const stored = proofs.get(nonce);
+  if (!stored) return fail(`No proof for nonce '${nonce}' in this session; call leash_request_payment first.`);
+  if (stored.rail !== 'paypal' || !stored.paypalMerchantId) {
+    return fail(`The proof for nonce '${nonce}' pays ${stored.recipient}, which is not a PayPal merchant in this policy; use leash_execute_onchain.`);
+  }
+  const res = await fetch(`${base}/api/pay`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ owner, proofHex: stored.proofHex, publicInputsHex: stored.publicInputsHex, paypalMerchantId: stored.paypalMerchantId }),
+  });
+  const body = (await res.json()) as { success?: boolean; consumed?: boolean; error?: string; receipt?: Receipt };
+  if (body.consumed && body.receipt) {
+    spendTracker.advance(body.receipt.policyId, {
+      epoch: stored.spend.epoch,
+      spentBeforeCents: stored.spend.spentBeforeCents,
+      amountCents: stored.amount,
+      newSpendCommit: stored.newSpendCommit,
+    });
+  }
+  if (!body.receipt) return fail(`Gateway refused (${res.status}): ${body.error ?? 'unknown error'}`);
+  const r = body.receipt;
+  return ok({
+    status: r.status,
+    amountCents: r.amountCents,
+    paypalOrderId: r.paypalOrderId,
+    captureId: r.captureId,
+    custom_id: r.custom_id,
+    ...(r.status === 'AWAITING_APPROVAL'
+      ? { awaitingApproval: true, approveUrl: r.approveUrl, note: 'Above the owner approval threshold: the buyer must open approveUrl; the gateway captures after approval.' }
+      : {}),
+    ...(r.status === 'FAILED' ? { error: r.error } : {}),
+  });
+}
+
+async function findReceipt(nonce: string): Promise<ToolResult> {
+  const found: Receipt[] = receipts().byNonce(nonce);
+  const base = gatewayUrl();
+  let gatewayNote: string | undefined;
+  if (base) {
+    const owner = policyOwner();
+    const q = isAddress(owner) ? `?policyId=${policyIdOf(owner, policy().policyCommitment)}` : '';
+    try {
+      const res = await fetch(`${base}/api/receipts/${encodeURIComponent(nonce)}${q}`);
+      if (res.ok) {
+        const b = (await res.json()) as { receipt?: Receipt; receipts?: Receipt[] };
+        found.push(...(b.receipt ? [b.receipt] : b.receipts ?? []));
+      } else if (res.status !== 404) gatewayNote = `gateway answered ${res.status}`;
+    } catch (e) {
+      gatewayNote = `gateway unreachable: ${String((e as Error).message)}`;
+    }
+  }
+  if (found.length === 0) return fail(`No receipt for nonce '${nonce}'${gatewayNote ? ` (${gatewayNote})` : ''}.`);
+  return ok({ receipts: found, ...(gatewayNote ? { gatewayNote } : {}) });
 }
 
 export const TOOLS = [
@@ -172,6 +291,26 @@ export const TOOLS = [
         },
       },
       required: ['merchant', 'amountCents', 'nonce'],
+    },
+  },
+  {
+    name: 'leash_pay_paypal',
+    description:
+      'Release a proven payment to a PayPal merchant through the verify-only LEASH gateway (Orders v2). Above the owner approval threshold it returns approveUrl for the buyer; otherwise a vaulted wallet is charged. Without PayPal credentials the gateway answers "Setup required".',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { nonce: { type: 'string', description: 'Nonce used in leash_request_payment' } },
+      required: ['nonce'],
+    },
+  },
+  {
+    name: 'leash_receipt',
+    description:
+      'Look up the receipt for a nonce: policyId, amount (cents), salted merchant hash, payee, proof hash, vk hash, and the PayPal order/capture ids or the on-chain tx hash.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: { nonce: { type: 'string', description: 'Payment nonce' } },
+      required: ['nonce'],
     },
   },
   {
@@ -225,10 +364,13 @@ export async function callTool(
           return fail('nonce must be a non-empty string');
         }
         const recipient = typeof args.recipient === 'string' ? args.recipient : undefined;
-        // With a LeashPayment contract configured, prove for the EVM verifier (keccak transcript).
-        const useEvmTarget = Boolean(process.env.LEASH_PAYMENT_CONTRACT_ADDRESS);
         const p = policy();
-        const spend = spendInputs(p.policyCommitment);
+        // A merchant listed with a PayPal merchant id settles through the gateway (PayPal rail);
+        // otherwise on chain. The EVM rail proves for the Solidity verifier (keccak transcript).
+        const leaf = p.merchantLeaves.find((m) => m.name === merchant.trim().toLowerCase());
+        const rail: 'evm' | 'paypal' = leaf?.paypalMerchantId ? 'paypal' : 'evm';
+        const useEvmTarget = rail === 'evm' && Boolean(process.env.LEASH_PAYMENT_CONTRACT_ADDRESS);
+        const spend = rail === 'paypal' && gatewayUrl() ? await gatewaySpendInputs(p.policyCommitment) : spendInputs(p.policyCommitment);
 
         const proof = generatePaymentProof({
           policy: p,
@@ -255,10 +397,15 @@ export async function callTool(
             amount: amountCents,
             spend,
             newSpendCommit: proof.publicInputs.new_spend_commit,
+            rail,
+            merchantIdHash: proof.publicInputs.merchant_id_hash,
+            recipient: proof.publicInputs.recipient,
+            paypalMerchantId: leaf?.paypalMerchantId,
           });
         }
         return ok({
           approved: verification.valid,
+          rail,
           // publicInputs.amount is the proven amount in cents (300 = $3.00), not dollars.
           amountCents,
           units: { amount: 'cents', onchain: '1 cent settles as 1 wei on the demo chain' },
@@ -276,6 +423,14 @@ export async function callTool(
           return fail('recipient must be a 0x-prefixed 20-byte address');
         }
         return executeOnchain(args.nonce, r as string | undefined);
+      }
+      case 'leash_pay_paypal': {
+        if (typeof args.nonce !== 'string' || !args.nonce.trim()) return fail('nonce must be a non-empty string');
+        return await payPaypal(args.nonce);
+      }
+      case 'leash_receipt': {
+        if (typeof args.nonce !== 'string' || !args.nonce.trim()) return fail('nonce must be a non-empty string');
+        return await findReceipt(args.nonce);
       }
       default:
         return fail(`Unknown tool: ${name}`);

@@ -12,9 +12,12 @@
     "gen:fixture": "./scripts/gen-proof-fixture.sh",
     "dev:gateway": "pnpm --filter @leash/core dev",
     "dev:web": "pnpm --filter web dev",
-    "start": "pnpm --filter @leash/core start"
+    "start": "pnpm --filter @leash/core start",
+    "verify:receipt": "tsx scripts/verify-receipt.ts",
+    "paypal:e2e": "tsx scripts/paypal-sandbox-e2e.ts"
   },
   "devDependencies": {
+    "tsx": "4.19.2",
     "typescript": "^5.7.3"
   }
 }

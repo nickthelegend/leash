@@ -105,3 +105,35 @@ contract FrontRunTest is LeashTestBase {
         require(SINK.balance == 1000, "owner withdraws");
     }
 }
+
+// Escrow-funded run: the owner funds at registration; an unrelated relayer submits the real proof
+// with no msg.value and the payment comes out of the owner's policy escrow.
+contract RelayerEscrowTest is LeashTestBase {
+    address constant RELAYER = address(0xBEEF01);
+
+    function test_relayer_pays_from_escrow_without_value() public {
+        payment.registerPolicy{value: 1000}(policyCommitment);
+        uint256 merchantBefore = merchant.balance;
+        uint256 relayerBefore = RELAYER.balance;
+        vm.prank(RELAYER);
+        payment.executePayment(address(this), policyCommitment, amount, merchantHash, nonce, merchant, spend, _proof());
+        require(merchant.balance == merchantBefore + amount, "merchant paid the proven amount");
+        require(payment.policyBalance(_id(policyCommitment)) == 1000 - amount, "paid from escrow");
+        require(RELAYER.balance == relayerBefore, "relayer spent no value");
+    }
+
+    function test_relayer_cannot_redirect_or_overdraw() public {
+        payment.registerPolicy{value: 100}(policyCommitment); // less than the 300 proven
+        vm.prank(RELAYER);
+        (bool ok, ) = address(payment).call(abi.encodeCall(
+            LeashPayment.executePayment, (address(this), policyCommitment, amount, merchantHash, nonce, merchant, spend, _proof())
+        ));
+        require(!ok, "overdraw accepted");
+        vm.prank(RELAYER);
+        (ok, ) = address(payment).call(abi.encodeCall(
+            LeashPayment.executePayment, (address(this), policyCommitment, amount, merchantHash, nonce, payable(RELAYER), spend, _proof())
+        ));
+        require(!ok, "redirect to relayer accepted");
+        require(payment.policyBalance(_id(policyCommitment)) == 100, "escrow intact");
+    }
+}
