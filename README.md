@@ -12,10 +12,28 @@ Built for the PayPal AI Hackathon.
 
 | Part | State |
 |---|---|
-| Noir circuit, UltraHonk verifier, `LeashPayment` contract | Done; 16 nargo + 48 forge tests on real proofs |
+| Noir circuit, UltraHonk verifier, `LeashPayment` contract | Done; 16 nargo + 48 forge tests on real proofs (144 tests in all, [TESTING.md](TESTING.md)) |
 | PayPal Orders v2 (create with `custom_id`, buyer approval or Vault v3 `vault_id`, capture checked against the proven cents) | **Implemented, live run pending sandbox keys** (`PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPAL_PAYEE_MERCHANT_ID`). No sandbox order has run yet. |
 | EVM rail | Runs on a local Anvil chain only. It is a **settlement stand-in**: 1 cent settles as 1 wei. |
 | Proof-gated proxy for PayPal's agent toolkit MCP server | Implemented and tested against a local stdio upstream; the live `@paypal/mcp` upstream needs `PAYPAL_ACCESS_TOKEN` (Setup required). |
+| LLM-in-the-loop policy-violation matrix | `pnpm matrix:llm`: 3 of 9 cases run live on 2026-10-21 (released / refused R2 / refused payee swap); 6 pending on the free-tier request budget. See [Testing](#testing). |
+| Public testnet deployment | **None.** Needs a funded testnet key: no captcha-free, account-free Base Sepolia or Arbitrum Sepolia faucet worked on 2026-10-21. |
+
+## Run it (judges)
+
+```sh
+pnpm install
+pnpm setup:tools   # pinned nargo 1.0.0-beta.16 + bb 3.0.1 into .tools; checks Foundry, jq, node
+pnpm test          # nargo + forge + @leash/core + @leash/mcp, every proof real; the live PayPal test skips without keys
+pnpm demo:anvil    # local Anvil with LeashVerifier + LeashPayment and the demo policy registered and funded
+pnpm paypal:e2e    # proof -> PayPal order -> buyer approves -> capture checked against the proven cents
+```
+
+The PayPal step needs sandbox credentials a judge supplies: `PAYPAL_CLIENT_ID`,
+`PAYPAL_CLIENT_SECRET` (a sandbox REST app) and `PAYPAL_PAYEE_MERCHANT_ID` (that app's sandbox
+business account), plus a sandbox **personal** account to approve the order. Without them
+`pnpm paypal:e2e` prints `Setup required (PAYPAL_CLIENT_ID)` and a numbered checklist of exactly what
+to create in the PayPal Developer Dashboard, and makes no PayPal call.
 
 ## Architecture
 
@@ -106,13 +124,15 @@ start with `Setup required (PAYPAL_ACCESS_TOKEN)`.
 
 ## Setup
 
-Requirements: Node, pnpm, Foundry, and the pinned Noir toolchain from [TOOLCHAIN.md](TOOLCHAIN.md):
-**nargo 1.0.0-beta.16** and **bb 3.0.1** at `.tools/nargo` and `.tools/bb` (or set `NARGO` / `BB`).
+Requirements: Node 20+, pnpm, Foundry, jq, and the pinned Noir toolchain from
+[TOOLCHAIN.md](TOOLCHAIN.md): **nargo 1.0.0-beta.16** and **bb 3.0.1** at `.tools/nargo` and
+`.tools/bb` (`pnpm setup:tools` puts them there; or set `NARGO` / `BB`).
 
 ```sh
-pnpm install
-cp .env.example .env.local           # PayPal sandbox values go here (gitignored); see the list below
-PATH="$PWD/.tools:$PATH" pnpm test   # builds core + keys, then core, leash-mcp, nargo and forge tests
+pnpm install && pnpm setup:tools
+cp .env.example .env.local           # PayPal sandbox values (gitignored); read by paypal:e2e, the gateway, leash-mcp
+cp .env.local apps/web/.env.local    # the Next console reads its own folder's .env.local
+pnpm test                            # builds core + keys, then core, leash-mcp, nargo and forge tests
 pnpm dev:web                         # console + PayPal release route on :3000 (owner device)
 pnpm dev:gateway                     # optional standalone verify-only gateway
 ```
@@ -120,8 +140,9 @@ pnpm dev:gateway                     # optional standalone verify-only gateway
 Environment (names only): `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPAL_ENVIRONMENT`
 (`sandbox` default), `PAYPAL_PAYEE_MERCHANT_ID` (sandbox business account that receives payments; adds
 a PayPal merchant to the default allowlist), `PAYPAL_ACCESS_TOKEN` (proxy only), `LEASH_GATEWAY_URL`,
-`LEASH_POLICY_OWNER_ADDRESS`, `LEASH_HOME` (owner-device state, default `.leash/`, gitignored),
-`LEASH_OWNER_DEVICE`, `LEASH_DAILY_CAP_CENTS`, and the EVM rail's `LEASH_RPC_URL`,
+`LEASH_POLICY_OWNER_ADDRESS`, `LEASH_CONSOLE_OWNER` (owner of the console's policies), `LEASH_HOME`
+(owner-device state, default `.leash/`, gitignored), `LEASH_OWNER_DEVICE`, `LEASH_DAILY_CAP_CENTS`,
+`LEASH_PUBLIC_URL`, and the EVM rail's `LEASH_RPC_URL`,
 `LEASH_PAYMENT_CONTRACT_ADDRESS`, `LEASH_SENDER_ADDRESS`, `LEASH_PAY_FROM_ESCROW`.
 
 Regenerate the verifier and proof fixtures with `pnpm gen:fixture` (refuses other tool versions).
@@ -201,9 +222,17 @@ leash-mcp's own `LEASH_MCP_LOG` entries (proof bytes shown as a length only). Ti
 
 ## Testing
 
-Real counts and how each layer is tested: [TESTING.md](TESTING.md). No PayPal mocks: PayPal tests are
-pure request-body/assertion tests plus one live sandbox test that is skipped with a visible
+Real counts and how each layer is tested: [TESTING.md](TESTING.md): 144 passing, 1 skipped (16 nargo,
+48 forge, 70 `@leash/core`, 10 `@leash/mcp`), plus web lint and build in CI. No PayPal mocks: PayPal
+tests are pure request-body/assertion tests plus one live sandbox test that is skipped with a visible
 `Setup required (PAYPAL_CLIENT_ID)` until keys exist.
+
+**LLM in the loop.** `pnpm matrix:llm` gives matrix prompts to a real model (opencode; its only
+tools are leash-mcp's) on a fresh Anvil chain, and reads leash-mcp's own tool log. On 2026-10-21, 3
+of 9 cases ran on the free tier: a $3.00 payment was released, the injected $500.00 request was
+refused by the per-payment cap, and the injected "new bank details" payee was refused by the circuit
+(`Merchant/payee pair not in allowlist`). The other 6 are pending (request budget). Evidence:
+`docs/evidence/llm-matrix-2026-10-21.json`.
 
 ## Limitations
 

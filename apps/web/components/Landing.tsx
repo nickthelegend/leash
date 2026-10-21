@@ -408,10 +408,11 @@ function RailAndFinePrint() {
               </details>
             ))}
           </div>
-          <pre className="lz-pre" aria-label="Local setup commands">{`pnpm install
-cp .env.example .env.local
-pnpm dev:gateway
-pnpm dev:web`}</pre>
+          <pre className="lz-pre" aria-label="Run it locally">{`pnpm install
+pnpm setup:tools  # pinned nargo+bb
+pnpm test         # real proofs
+pnpm demo:anvil   # local chain
+pnpm paypal:e2e   # sandbox keys`}</pre>
           <div className="lz-cta">
             <a className="btn btn-dark" href={REPO_URL} target="_blank" rel="noreferrer">
               Get the code <ArrowRight aria-hidden="true" />

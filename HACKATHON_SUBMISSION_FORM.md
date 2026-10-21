@@ -1,7 +1,17 @@
 # Hackathon submission form — LEASH
 
-Target: **PayPal AI Hackathon** (https://paypalaihackathon.devpost.com/), deadline 2026-11-12 (time
-per the event page). Prize amounts: see the event page; not restated here.
+Target: **PayPal AI Hackathon** (https://paypalaihackathon.devpost.com/), deadline **2026-11-12
+12:00 PT (20:00 UTC)**. Also a fit for the "Best Use of Agentic Commerce" honorable mention. Prize
+amounts: see the event page; not restated here.
+
+Event requirements and where this entry stands (rules: paypalaihackathon.devpost.com/rules):
+
+| Requirement | Status |
+|---|---|
+| PayPal developer platform central to the project | Orders v2 + Vault v3 implemented; **no sandbox order yet** (needs keys) |
+| Judges can run it (setup incl. sandbox credentials, or a hosted URL) | `pnpm install && pnpm setup:tools && pnpm test`; PayPal step needs the judge's sandbox credentials (below). No hosted URL |
+| Public repo, OSS license in About | github.com/nickthelegend/leash, MIT (`LICENSE`, which GitHub shows in About) |
+| Video < 3 min, public on YouTube, showing it working end to end | 136 s Anvil recording exists, not on YouTube; a PayPal-first re-recording waits for a sandbox order |
 
 ## Project name
 LEASH — a ZK spending leash for AI agents
@@ -38,22 +48,41 @@ screenshot once one does.
 ## How AI is used
 An LLM agent (opencode with an OpenRouter model) pays only through leash-mcp's tools; the recorded
 run shows it complying, being injected, and being refused by the circuit and the contract.
+`pnpm matrix:llm` repeats this per policy-violation case: each matrix prompt goes to the agent as an
+inbox item, and leash-mcp's own tool log records what the agent asked for and which layer refused it
+(results in TESTING.md).
+
+## Testing instructions for judges
+```sh
+pnpm install
+pnpm setup:tools   # pinned nargo 1.0.0-beta.16 + bb 3.0.1 into .tools; checks Foundry and jq
+pnpm test          # every proof real; the live PayPal test skips without keys
+pnpm demo:anvil    # local chain with the demo policy
+pnpm paypal:e2e    # the PayPal path
+```
+For the PayPal path a judge supplies sandbox credentials in `.env.local`: `PAYPAL_CLIENT_ID`,
+`PAYPAL_CLIENT_SECRET`, `PAYPAL_PAYEE_MERCHANT_ID` (the app's sandbox business account) and approves
+with a sandbox personal account. `pnpm paypal:e2e` without them prints the exact dashboard checklist.
 
 ## Built with
 Noir 1.0.0-beta.16, Barretenberg 3.0.1 (UltraHonk), Solidity/Foundry, Anvil, TypeScript, Node,
 Express, Next.js 15, Model Context Protocol SDK, PayPal Orders v2 + Vault v3.
 
 ## Evidence
-- Tests: 115 passing, 1 skipped (live PayPal) — see [TESTING.md](TESTING.md).
+- Tests: 144 passing, 1 skipped (live PayPal) — see [TESTING.md](TESTING.md); web lint + build in CI.
+- LLM-in-the-loop matrix (2026-10-21, 3 of 9 cases, free tier): released $3.00; injected $500.00
+  refused by the per-payment cap; injected payee swap refused by the circuit. 6 cases pending.
+  `docs/evidence/llm-matrix-2026-10-21.json`.
 - Verifier: `contracts/src/LeashVerifier.sol`, EVM vk_hash
   `0x0293ccf79f5bbab5e8f19404833acd3025767d0bf162587ade1936f55e0242c1`.
 - Demo: 136-second live Anvil recording, 2026-10-21 (README "Demo video"); timed script in
   [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md). A PayPal-first re-recording follows once sandbox keys exist.
-- No public testnet deployment: the EVM leg is a local settlement stand-in (1 cent = 1 wei).
+- No public testnet deployment: the EVM leg is a local settlement stand-in (1 cent = 1 wei). A
+  deployment needs a funded testnet key; no captcha-free, account-free faucet worked (2026-10-21).
 
 ## Links
 - Repo: https://github.com/nickthelegend/leash
-- Video: (to add once hosted)
+- Video: (to add once on YouTube; must be public and under 3 minutes)
 
 ## Team
 Nivesh Gajengi (GitHub nickthelegend)
