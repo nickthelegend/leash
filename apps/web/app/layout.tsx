@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from 'next';
-import { Sora, JetBrains_Mono } from 'next/font/google';
+import { Sora, Source_Code_Pro } from 'next/font/google';
 import './globals.css';
 
 const sora = Sora({
@@ -9,7 +9,7 @@ const sora = Sora({
   display: 'swap',
 });
 
-const mono = JetBrains_Mono({
+const mono = Source_Code_Pro({
   subsets: ['latin'],
   weight: ['400', '500'],
   variable: '--font-mono',
