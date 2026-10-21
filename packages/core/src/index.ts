@@ -1,3 +1,4 @@
+export * from './crypto/evm.js';
 export * from './crypto/hasher.js';
 export * from './gateway/nonceStore.js';
 export * from './gateway/server.js';

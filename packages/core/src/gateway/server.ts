@@ -10,7 +10,6 @@ import {
   SpendingPolicy,
 } from '../policy/policy.js';
 import { generatePaymentProof } from '../prover/prover.js';
-import { verifyPaymentProof } from '../verifier/verifier.js';
 import { createVerifierRouter } from '../verifier/service.js';
 import { nonceStore } from './nonceStore.js';
 
@@ -157,158 +156,9 @@ app.post('/api/prove', (req: Request, res: Response) => {
   }
 });
 
-/**
- * Leash Gateway Payment Release Endpoint:
- * Verifies the ZK proof against the committed policy before triggering payment.
- */
-app.post('/api/pay', async (req: Request, res: Response) => {
-  const startTime = Date.now();
-  try {
-    const {
-      policyCommitment,
-      amountCents,
-      merchantIdHash,
-      nonce,
-      proofHex,
-      publicInputsHex,
-      merchantName,
-    } = req.body;
-
-    if (
-      !policyCommitment ||
-      amountCents === undefined ||
-      !merchantIdHash ||
-      !nonce ||
-      !proofHex ||
-      !publicInputsHex
-    ) {
-      return res.status(400).json({
-        success: false,
-        error:
-          'Missing required parameters: policyCommitment, amountCents, merchantIdHash, nonce, proofHex, publicInputsHex',
-      });
-    }
-
-    const nonceStr = nonce.toString();
-    const amountNum = Number(amountCents);
-
-    // 1. Verify policy is registered
-    if (!registeredCommitments.has(policyCommitment.toLowerCase())) {
-      nonceStore.addAuditEntry({
-        id: `log_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        timestamp: new Date().toISOString(),
-        policyCommitment,
-        amountCents: amountNum,
-        merchantIdHash,
-        nonce: nonceStr,
-        proofVerified: false,
-        status: 'REJECTED',
-        rejectionReason: 'Policy commitment not registered on Gateway',
-        durationMs: Date.now() - startTime,
-      });
-
-      return res.status(400).json({
-        success: false,
-        error: 'Policy commitment not registered on Gateway',
-      });
-    }
-
-    // 2. Replay Protection: Check if nonce was already used
-    if (nonceStore.isNonceUsed(nonceStr)) {
-      nonceStore.addAuditEntry({
-        id: `log_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        timestamp: new Date().toISOString(),
-        policyCommitment,
-        amountCents: amountNum,
-        merchantIdHash,
-        nonce: nonceStr,
-        proofVerified: false,
-        status: 'REJECTED',
-        rejectionReason: 'Nonce replay detected: nonce already used',
-        durationMs: Date.now() - startTime,
-      });
-
-      return res.status(400).json({
-        success: false,
-        error: 'Nonce replay detected. Nonce has already been consumed.',
-        nonce: nonceStr,
-      });
-    }
-
-    // 3. Cryptographic Proof Verification
-    const verifyResult = verifyPaymentProof({
-      proofHex,
-      publicInputsHex,
-      expectedCommitment: policyCommitment,
-      expectedAmount: amountNum,
-      expectedMerchantHash: merchantIdHash,
-      expectedNonce: nonceStr,
-    });
-
-    if (!verifyResult.valid) {
-      nonceStore.addAuditEntry({
-        id: `log_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        timestamp: new Date().toISOString(),
-        policyCommitment,
-        amountCents: amountNum,
-        merchantIdHash,
-        nonce: nonceStr,
-        proofVerified: false,
-        status: 'REJECTED',
-        rejectionReason: verifyResult.error || 'Invalid ZK proof',
-        durationMs: Date.now() - startTime,
-      });
-
-      return res.status(400).json({
-        success: false,
-        error: `Invalid ZK proof: ${verifyResult.error}`,
-        nonce: nonceStr,
-      });
-    }
-
-    // 4. Mark nonce as consumed
-    nonceStore.recordNonce(nonceStr);
-
-    // 5. Release payment through PayPal Orders API
-    const effectiveMerchant = merchantName || 'Authorized Merchant';
-    const paypalResult = await paypalService.executeOrder(
-      amountNum,
-      effectiveMerchant,
-      nonceStr
-    );
-
-    const logEntry = {
-      id: `log_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-      timestamp: new Date().toISOString(),
-      policyCommitment,
-      amountCents: amountNum,
-      merchantIdHash,
-      nonce: nonceStr,
-      proofVerified: true,
-      status: 'COMPLETED' as const,
-      paypalOrderId: paypalResult.orderId,
-      paypalStatus: paypalResult.status,
-      durationMs: Date.now() - startTime,
-    };
-    nonceStore.addAuditEntry(logEntry);
-
-    res.json({
-      success: true,
-      verified: true,
-      nonce: nonceStr,
-      policyCommitment,
-      amountCents: amountNum,
-      merchantIdHash,
-      paypal: paypalResult,
-      durationMs: Date.now() - startTime,
-    });
-  } catch (err: any) {
-    res.status(500).json({
-      success: false,
-      error: `Gateway internal error: ${err.message}`,
-    });
-  }
-});
+// No /api/pay here: payments are released only by the Next.js route (apps/web/app/api/pay), which
+// creates and captures a real PayPal order. This Express gateway used to log COMPLETED without
+// calling PayPal; that duplicate route is gone.
 
 /**
  * Public Audit Log: Shows all transaction logs without revealing secret rules
