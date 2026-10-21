@@ -14,7 +14,8 @@
     "dev:web": "pnpm --filter web dev",
     "start": "pnpm --filter @leash/core start",
     "verify:receipt": "tsx scripts/verify-receipt.ts",
-    "paypal:e2e": "tsx scripts/paypal-sandbox-e2e.ts"
+    "paypal:e2e": "tsx scripts/paypal-sandbox-e2e.ts",
+    "matrix:llm": "tsx scripts/llm-matrix.ts"
   },
   "devDependencies": {
     "tsx": "4.19.2",

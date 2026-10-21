@@ -4,6 +4,7 @@ export * from './gateway/payGateway.js';
 export * from './gateway/receipts.js';
 export * from './gateway/server.js';
 export * from './harness/injectionSuite.js';
+export * from './harness/llmMatrix.js';
 export * from './paypal/paypal.js';
 export * from './paypal/setup.js';
 export * from './policy/policy.js';
