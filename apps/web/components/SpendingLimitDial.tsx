@@ -184,7 +184,7 @@ export function SpendingLimitDial({
           ref={svgRef}
           width={size}
           height={size}
-          className="overflow-visible rounded-full"
+          className="overflow-visible rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-cobalt-900"
           onMouseDown={onMouseDown}
           onTouchStart={onTouchStart}
           onKeyDown={onKeyDown}
@@ -197,11 +197,13 @@ export function SpendingLimitDial({
           aria-valuetext={`${valueCents} cents ($${(valueCents / 100).toFixed(2)}) per transaction`}
           aria-disabled={disabled}
         >
+          {/* Spool coils */}
+          <circle cx={center} cy={center} r={radius - 16} fill="none" stroke="#0a1a4a" strokeOpacity={0.22} strokeWidth={1.5} strokeDasharray="3 5" />
           {/* Background track */}
           <path
             d={backgroundArc}
             fill="none"
-            stroke="#172d6f"
+            stroke="rgba(10,26,74,0.16)"
             strokeWidth={strokeWidth}
             strokeLinecap="round"
           />
@@ -211,7 +213,7 @@ export function SpendingLimitDial({
             <path
               d={activeArc}
               fill="none"
-              stroke="#ffd84d"
+              stroke="#0a1a4a"
               strokeWidth={strokeWidth}
               strokeLinecap="round"
             />
@@ -222,22 +224,22 @@ export function SpendingLimitDial({
             cx={knobPos.x}
             cy={knobPos.y}
             r={10}
-            fill="#ffffff"
-            stroke="#ffd84d"
+            fill="#ffd84d"
+            stroke="#0a1a4a"
             strokeWidth={4}
           />
         </svg>
 
         {/* Center Readout */}
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-          <span className="text-[12px] text-white/60">Rule R2 cap</span>
-          <div className="flex items-baseline font-medium tracking-tightest text-white">
+          <span className="text-[11.5px] text-[#3a4470]">Lead per payment</span>
+          <div className="flex items-baseline font-semibold tracking-tightest text-cobalt-900">
             <span className="text-[34px] leading-none">${Math.floor(valueCents / 100)}</span>
-            <span className="text-[34px] leading-none text-white/40">
+            <span className="text-[34px] leading-none text-cobalt-900/40">
               .{String(valueCents % 100).padStart(2, '0')}
             </span>
           </div>
-          <span className="mt-1 mono text-[11.5px] text-white/55">{valueCents} cents / tx</span>
+          <span className="mt-1 mono text-[11.5px] text-[#3a4470]">{valueCents} cents / tx</span>
         </div>
       </div>
 
@@ -247,7 +249,7 @@ export function SpendingLimitDial({
           type="button"
           onClick={() => onChange(Math.max(minCents, valueCents - stepCents))}
           disabled={disabled || valueCents <= minCents}
-          className="grid place-items-center w-9 h-9 rounded-full bg-cobalt-700 hover:bg-cobalt-600 text-white disabled:opacity-40 transition-colors"
+          className="grid place-items-center w-9 h-9 rounded-[10px] bg-cobalt-900/10 hover:bg-cobalt-900/20 text-cobalt-900 disabled:opacity-40 transition-colors"
           aria-label="Decrease cap by $0.50"
         >
           <Minus className="w-4 h-4" aria-hidden="true" />
@@ -264,10 +266,10 @@ export function SpendingLimitDial({
                 onClick={() => onChange(preset)}
                 disabled={disabled}
                 aria-pressed={isSelected}
-                className={`h-9 px-3 rounded-full text-[13px] font-medium transition-colors disabled:opacity-50 ${
+                className={`h-9 px-3 rounded-[10px] text-[13px] font-medium transition-colors disabled:opacity-50 ${
                   isSelected
-                    ? 'bg-sun text-sun-ink'
-                    : 'bg-cobalt-700 text-white/75 hover:text-white hover:bg-cobalt-600'
+                    ? 'bg-cobalt-900 text-sun'
+                    : 'bg-cobalt-900/10 text-cobalt-900 hover:bg-cobalt-900/20'
                 }`}
               >
                 ${preset / 100}
@@ -280,7 +282,7 @@ export function SpendingLimitDial({
           type="button"
           onClick={() => onChange(Math.min(maxCents, valueCents + stepCents))}
           disabled={disabled || valueCents >= maxCents}
-          className="grid place-items-center w-9 h-9 rounded-full bg-cobalt-700 hover:bg-cobalt-600 text-white disabled:opacity-40 transition-colors"
+          className="grid place-items-center w-9 h-9 rounded-[10px] bg-cobalt-900/10 hover:bg-cobalt-900/20 text-cobalt-900 disabled:opacity-40 transition-colors"
           aria-label="Increase cap by $0.50"
         >
           <Plus className="w-4 h-4" aria-hidden="true" />

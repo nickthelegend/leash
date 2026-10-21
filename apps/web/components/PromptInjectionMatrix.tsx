@@ -93,11 +93,11 @@ export function PromptInjectionMatrix() {
   ];
 
   return (
-    <div className="rounded-panel bg-cobalt-800 p-5 sm:p-7 ring-1 ring-inset ring-cobalt-line">
+    <div className="cx-panel p-5 sm:p-7">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
           <h2 className="text-[26px] sm:text-[32px] leading-[1.05] font-medium tracking-tightest">
-            Policy-violation matrix
+            Pull test: 26 tugs on one policy
           </h2>
           <p className="mt-2 text-[14px] text-white/65 max-w-[60ch]">
             26 payments an injected agent might ask for: cap overrides, unlisted merchants, homoglyphs, a swapped

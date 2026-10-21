@@ -47,10 +47,10 @@ export function ZKProofIndicator({
     : isSetup
     ? { label: 'Setup required', cls: 'bg-sun text-sun-ink' }
     : isBlocked
-    ? { label: 'Blocked', cls: 'bg-no-soft text-no' }
+    ? { label: 'Snapped', cls: 'bg-no-soft text-no' }
     : isProving
     ? { label: 'Proving', cls: 'bg-cobalt-600 text-white' }
-    : { label: 'Standby', cls: 'bg-cobalt-700 text-white/70' };
+    : { label: 'Slack', cls: 'bg-cobalt-700 text-white/70' };
 
   const Icon = isVerified ? ShieldCheck : isSetup ? KeyRound : isBlocked ? ShieldAlert : isProving ? Loader2 : Lock;
 
@@ -59,10 +59,10 @@ export function ZKProofIndicator({
     : isSetup
     ? 'Setup required: not configured'
     : isBlocked
-    ? 'Payment blocked, nothing released'
+    ? 'Snapped taut: nothing released'
     : isProving
-    ? 'Generating the proof…'
-    : 'Waiting for a spending request';
+    ? 'Paying out: generating the proof…'
+    : 'Slack lead: waiting for a payment request';
 
   const sub = isVerified
     ? proofData?.durationMs !== undefined
@@ -72,7 +72,7 @@ export function ZKProofIndicator({
     ? proofData?.rejectionReason || 'The request was refused. No money moved.'
     : isProving
     ? 'Solving the policy commitment, the (merchant, payee) allowlist path, the per-payment cap and the daily cap.'
-    : 'Run the demo or pay from an agent card. The cap and the merchant stay hidden; only rule compliance is proven.';
+    : 'Run the walk test or pay from an agent tag. The cap and the merchant stay hidden; only that the payment is inside them is proven.';
 
   const iconWrap = isVerified
     ? 'bg-ok-soft text-ok'
@@ -84,13 +84,13 @@ export function ZKProofIndicator({
 
   return (
     <div
-      className="rounded-panel bg-cobalt-800 p-5 sm:p-7 ring-1 ring-inset ring-cobalt-line h-full flex flex-col"
+      className="cx-panel p-5 sm:p-7 h-full flex flex-col"
       aria-live="polite"
       aria-busy={isProving}
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-[13px] text-white/60">Proof status</div>
+          <div className="text-[13px] text-white/60">Lead state</div>
           <div className="text-lg font-medium tracking-tighter2 truncate">{status === 'idle' ? 'Noir · Barretenberg' : agentName}</div>
         </div>
         <span className={`inline-flex items-center h-7 px-3 rounded-full text-[13px] font-medium ${pill.cls}`}>

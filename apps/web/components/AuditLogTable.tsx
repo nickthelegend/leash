@@ -91,7 +91,7 @@ function StatusPill({ log }: { log: AuditLogItem }) {
       className="inline-flex items-center gap-1.5 h-7 px-3 rounded-full text-[12px] font-medium bg-no-soft text-no whitespace-nowrap"
       title={log.rejectionReason}
     >
-      <XCircle className="w-3.5 h-3.5" aria-hidden="true" /> Blocked
+      <XCircle className="w-3.5 h-3.5" aria-hidden="true" /> Snapped
     </span>
   );
 }
@@ -111,11 +111,11 @@ export function AuditLogTable({
   isLoading = false,
 }: AuditLogTableProps) {
   return (
-    <div className="rounded-panel bg-cobalt-800 ring-1 ring-inset ring-cobalt-line overflow-hidden">
+    <div className="cx-panel overflow-hidden">
       <div className="p-5 sm:p-7 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
           <h2 className="text-[26px] sm:text-[32px] leading-[1.05] font-medium tracking-tightest">
-            Settlement and audit log
+            Walk log · this gateway
           </h2>
           <p className="mt-2 text-[14px] text-white/65 max-w-[62ch]">
             Receipts from the gateway: policy id, salted merchant hash, nonce, proof hash and PayPal ids. The
@@ -141,7 +141,7 @@ export function AuditLogTable({
           <Shield className="mx-auto w-6 h-6 text-white/40" aria-hidden="true" />
           <p className="mt-3 font-medium">{isLoading ? 'Waiting for the first result…' : 'No settlement records yet'}</p>
           <p className="mt-1 text-[13.5px] text-white/55">
-            Run the 10-second demo or pay from an agent card. Every attempt, paid or blocked, lands here.
+            Run the walk test or pay from an agent tag. Every attempt, paid or snapped, lands here.
           </p>
         </div>
       ) : (

@@ -45,14 +45,14 @@ export function DemoRunner({
     {
       key: 'legit' as const,
       icon: ShieldCheck,
-      title: 'Legit payment',
+      title: 'Payment inside the lead',
       amount: '300 cents ($3.00) to openai',
       body: 'Within the cap and on the allowlist. A real Noir proof is generated, then verified by bb before the release step runs.',
     },
     {
       key: 'attack' as const,
       icon: ShieldAlert,
-      title: 'Injection attack',
+      title: 'Injected tug',
       amount: '50,000 cents ($500.00) to openai',
       body: 'An injected prompt tries to drain $500. Rule R2 asserts amount <= max_per_tx, so witness generation fails and no proof exists.',
     },
@@ -65,10 +65,10 @@ export function DemoRunner({
   };
 
   return (
-    <div className="rounded-panel bg-cobalt-800 p-5 sm:p-7 ring-1 ring-inset ring-cobalt-line h-full flex flex-col">
+    <div className="cx-panel p-5 sm:p-7 h-full flex flex-col">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="inline-flex items-center h-7 px-3 rounded-full bg-sun text-sun-ink text-[13px] font-medium">
-          10-second demo
+        <span className="inline-flex items-center h-7 px-3 rounded-[7px] bg-sun text-sun-ink text-[13px] font-medium">
+          Walk test
         </span>
         <span className="inline-flex items-center gap-1.5 h-7 px-3 rounded-full bg-cobalt-700 text-white/75 text-[13px] mono">
           <Timer className="w-3.5 h-3.5" aria-hidden="true" />
@@ -77,7 +77,7 @@ export function DemoRunner({
       </div>
 
       <h2 className="mt-4 text-[28px] sm:text-[34px] leading-[1.05] font-medium tracking-tightest">
-        One honest payment, one attack
+        One payment, one tug
       </h2>
       <p className="mt-3 text-[15px] leading-relaxed text-white/70 max-w-[52ch]">
         Runs both through the real prover and verifier, one after the other. The proof panel and the audit log
@@ -143,8 +143,8 @@ export function DemoRunner({
               : step === 'attack'
               ? 'Trying the attack…'
               : step === 'complete'
-              ? 'Run the demo again'
-              : 'Run the 10-second demo'}
+              ? 'Run the walk test again'
+              : 'Run the walk test'}
           </span>
         </button>
       </div>

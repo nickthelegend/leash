@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Navbar } from '@/components/Navbar';
 import { LandingHero, LandingSections, SiteFooter } from '@/components/Landing';
-import { LeashLogo, LeashMark } from '@/components/Logo';
 import { PayPalSetupCard } from '@/components/PayPalSetupCard';
 import { DemoRunner } from '@/components/DemoRunner';
 import { ZKProofIndicator, ZKStatus, ZKProofData } from '@/components/ZKProofIndicator';
@@ -11,30 +10,31 @@ import { AgentCard, AgentConfig } from '@/components/AgentCard';
 import { AuditLogTable, AuditLogItem } from '@/components/AuditLogTable';
 import { PromptInjectionMatrix } from '@/components/PromptInjectionMatrix';
 
+// Example policies for the owner device. Names describe what each would pay for; no model is claimed.
 const INITIAL_AGENTS: AgentConfig[] = [
   {
     id: 'agent_1',
-    name: 'LLM Inference & Research Agent',
-    model: 'Claude 3.5 Sonnet',
-    role: 'Autonomous Inference & Prompt Processing',
+    name: 'Research agent',
+    model: 'Example policy',
+    role: 'Pays for inference',
     allowlistedMerchants: ['openai', 'anthropic', 'vercel'],
     capCents: 500, // $5.00
     commitmentHash: '',
   },
   {
     id: 'agent_2',
-    name: 'Cloud DevOps SRE Agent',
-    model: 'GPT-4o',
-    role: 'Infrastructure Auto-Scaling & Build Pipelines',
+    name: 'DevOps agent',
+    model: 'Example policy',
+    role: 'Pays for CI and hosting',
     allowlistedMerchants: ['aws', 'github', 'digitalocean'],
     capCents: 1000, // $10.00
     commitmentHash: '',
   },
   {
     id: 'agent_3',
-    name: 'Data Pipeline Agent',
-    model: 'DeepSeek V3',
-    role: 'Database Ingestion & Cache Syncing',
+    name: 'Data agent',
+    model: 'Example policy',
+    role: 'Pays for storage and sync',
     allowlistedMerchants: ['supabase', 'aws'],
     capCents: 300, // $3.00
     commitmentHash: '',
@@ -345,44 +345,35 @@ export default function Home() {
   const releasedWhole = Math.floor(releasedCents / 100).toLocaleString('en-US');
   const releasedFraction = String(releasedCents % 100).padStart(2, '0');
 
-  const consoleLinks = [
-    { href: '#run', label: 'Run' },
-    { href: '#fleet', label: 'Fleet' },
-    { href: '#harness', label: 'Violation matrix' },
-    { href: '#audit', label: 'Audit log' },
-  ];
-
   return (
     <div className="min-h-screen flex flex-col">
       <Navbar />
       <LandingHero />
       <LandingSections />
 
-      {/* Console: the app frame */}
-      <main id="console" className="bg-sun px-3 sm:px-6 lg:px-10 pt-12 sm:pt-16 pb-12 scroll-mt-0" aria-label="LEASH console">
-        <div className="mx-auto max-w-[1400px] rounded-[28px] sm:rounded-frame bg-cobalt-900 text-white p-4 sm:p-7 lg:p-9">
-          {/* Frame nav */}
-          <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
-            <LeashLogo href="#console" className="text-white" />
-            <nav aria-label="Console" className="order-3 w-full md:order-none md:w-auto">
-              <ul className="flex flex-wrap gap-x-6 gap-y-2 text-[15px]">
-                {consoleLinks.map((l) => (
-                  <li key={l.href}>
-                    <a href={l.href} className="text-white/75 hover:text-sun no-underline transition-colors">
-                      {l.label}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </nav>
-            <div className="flex items-center gap-2">
-              <span className="hidden sm:inline-flex items-center gap-2 h-10 px-4 rounded-full bg-cobalt-800 text-[13px] text-white/75">
-                <span className="mono">bb verify</span> · local gateway
-              </span>
-              <a href="#run" className="btn btn-accent btn-sm">
-                Run demo
-              </a>
+      {/* Console: the owner's device, same metaphor (tags, lead, snaps, walk log) */}
+      <main id="console" className="cx scroll-mt-0" aria-label="LEASH console">
+        <div className="cx-strap" aria-hidden="true" />
+        <div className="lz-wrap py-16 sm:py-20">
+          <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-5">
+            <div>
+              <p className="lz-num !text-sun">06 · Console · owner device</p>
+              <h2 className="lz-h2 !max-w-[22ch]">Put your own agents on a leash.</h2>
+              <p className="mt-4 text-[16px] leading-relaxed text-white/70 max-w-[62ch]">
+                Live, not the recording: each tag below is a policy committed by this server just now. Paying proves
+                with nargo and bb on this machine, then the verify-only gateway decides what is released.
+              </p>
             </div>
+            <dl className="flex flex-wrap gap-2 text-[13px]">
+              <div className="rounded-[10px] bg-cobalt-900 px-3 py-2">
+                <dt className="sr-only">Verifier</dt>
+                <dd className="mono text-white/80">bb verify · local gateway</dd>
+              </div>
+              <div className="rounded-[10px] bg-cobalt-900 px-3 py-2">
+                <dt className="inline text-white/55">owner </dt>
+                <dd className="inline mono text-sun">{owner ? `${owner.slice(0, 6)}…${owner.slice(-4)}` : 'loading…'}</dd>
+              </div>
+            </dl>
           </div>
 
           {policyError && (
@@ -391,84 +382,68 @@ export default function Home() {
             </div>
           )}
 
-          {/* Overview: balance-style number + PayPal status */}
-          <section aria-label="Session overview" className="mt-8 grid gap-4 lg:grid-cols-[1.45fr_1fr]">
-            <div className="rounded-panel bg-cobalt-800 p-5 sm:p-7 ring-1 ring-inset ring-cobalt-line">
+          {/* Session lead: what this gateway actually released */}
+          <section aria-label="Session overview" className="mt-10 grid gap-4 lg:grid-cols-[1.45fr_1fr]">
+            <div className="cx-panel p-5 sm:p-7">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <LeashMark className="w-10 h-10" />
-                  <span className="text-[20px] sm:text-[24px] font-medium tracking-tighter2">Released after a proof</span>
-                </div>
-                <span className="inline-flex items-center h-7 px-3 rounded-full bg-cobalt-700 text-[12.5px] text-white/70">
-                  This gateway session
-                </span>
+                <span className="text-[18px] sm:text-[20px] font-semibold tracking-tighter2">This session&rsquo;s lead</span>
+                <span className="mono text-[12.5px] text-white/55">from the gateway&rsquo;s receipts</span>
               </div>
               <div className="mt-5 flex flex-wrap items-baseline gap-x-4 gap-y-2">
-                <div className="font-medium tracking-tightest leading-none text-[56px] sm:text-[76px]" aria-label={`$${releasedWhole}.${releasedFraction} released`}>
-                  <span className="text-white/45">$</span>
-                  {releasedWhole}
-                  <span className="text-white/35">.{releasedFraction}</span>
+                <div
+                  className="font-semibold tracking-tightest leading-none text-[52px] sm:text-[72px]"
+                  aria-label={`${releasedCents} cents released`}
+                >
+                  {releasedCents}
+                  <span className="text-[20px] sm:text-[24px] font-normal tracking-normal text-white/50"> cents released</span>
                 </div>
-                <span className="inline-flex items-center h-8 px-3 rounded-full bg-sun-soft text-sun text-[13px]">
-                  {releasedCents} cents through PayPal
-                </span>
+                <span className="mono text-[13px] text-white/55">${releasedWhole}.{releasedFraction}</span>
               </div>
-              <dl className="mt-7 grid grid-cols-3 gap-3">
-                <div className="rounded-2xl bg-cobalt-700 p-3 sm:p-4">
+              <dl className="mt-6 grid grid-cols-3 gap-3">
+                <div className="rounded-[14px] bg-cobalt-800 p-3 sm:p-4">
                   <dt className="text-[12px] text-white/60">Paid</dt>
-                  <dd className="mt-1 text-[24px] sm:text-[28px] font-medium tracking-tighter2">{paidLogs.length}</dd>
+                  <dd className="mt-1 text-[24px] sm:text-[28px] font-semibold tracking-tighter2">{paidLogs.length}</dd>
                 </div>
-                <div className="rounded-2xl bg-cobalt-700 p-3 sm:p-4">
+                <div className="rounded-[14px] bg-cobalt-800 p-3 sm:p-4">
                   <dt className="text-[12px] text-white/60">Verified, not paid</dt>
-                  <dd className="mt-1 text-[24px] sm:text-[28px] font-medium tracking-tighter2">
+                  <dd className="mt-1 text-[24px] sm:text-[28px] font-semibold tracking-tighter2">
                     {notPaidCount + awaitingCount}
                   </dd>
                 </div>
-                <div className="rounded-2xl bg-cobalt-700 p-3 sm:p-4">
-                  <dt className="text-[12px] text-white/60">Blocked</dt>
-                  <dd className="mt-1 text-[24px] sm:text-[28px] font-medium tracking-tighter2">{blockedCount}</dd>
+                <div className="rounded-[14px] bg-cobalt-800 p-3 sm:p-4">
+                  <dt className="text-[12px] text-white/60">Snapped</dt>
+                  <dd className="mt-1 text-[24px] sm:text-[28px] font-semibold tracking-tighter2">{blockedCount}</dd>
                 </div>
               </dl>
               <p className="mt-4 text-[12.5px] text-white/50">
-                Counted from the gateway&rsquo;s receipts. A verified proof only counts as paid once PayPal reports the
-                capture COMPLETED for exactly the proven cents.
+                A verified proof only counts as paid once PayPal reports the capture COMPLETED for exactly the proven
+                cents.
               </p>
             </div>
             <PayPalSetupCard orderId={latestOrder?.paypalOrderId} orderStatus={latestOrder?.paypalStatus} />
           </section>
 
-          {/* Demo + live proof status */}
-          <section id="run" aria-label="Demo and live proof status" className="mt-4 grid gap-4 lg:grid-cols-2 scroll-mt-6">
-            <DemoRunner onRunLegitDemo={runLegitDemo} onRunAttackDemo={runAttackDemo} isRunning={isLoading} />
-            <ZKProofIndicator
-              status={zkStatus}
-              proofData={zkProofData}
-              agentName={agents.find((a) => a.id === activeAgentId)?.name}
-            />
-          </section>
-
-          {/* Agents & spending dials */}
-          <section id="fleet" aria-label="Agent spending limit dials" className="mt-12 scroll-mt-6">
-            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 mb-5">
+          {/* Agent tags */}
+          <section id="fleet" aria-labelledby="fleet-h" className="mt-14 scroll-mt-6">
+            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 mb-6">
               <div>
-                <h2 className="text-[30px] sm:text-[40px] leading-[1.02] font-medium tracking-tightest">
-                  Agent fleet and spending dials
-                </h2>
+                <h3 id="fleet-h" className="text-[26px] sm:text-[32px] leading-[1.05] font-semibold tracking-tightest">
+                  Agent tags
+                </h3>
                 <p className="mt-2 text-[14px] text-white/65 max-w-[64ch]">
-                  Turn a dial to change that agent&rsquo;s per-transaction cap; the policy is re-committed on the
-                  server. Only the commitment is shown, the rules stay secret.
+                  Turn a spool to change that agent&rsquo;s lead (its per-payment cap); the policy is re-committed and
+                  the tag gets a new hash. The daily cap is three leads long.
                 </p>
               </div>
-              <span className="inline-flex items-center h-8 px-3 rounded-full bg-cobalt-800 text-[13px] text-white/70 self-start sm:self-auto">
-                {agents.length} agents
-              </span>
+              <span className="mono text-[13px] text-white/55">{agents.length} example policies</span>
             </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
               {agents.map((agent) => (
                 <AgentCard
                   key={agent.id}
                   agent={agent}
+                  spentTodayCents={spendFor(agent.id).spentBeforeCents}
+                  dailyCapCents={agent.capCents * 3}
                   onCapChange={handleCapChange}
                   onTriggerPayment={executePayment}
                   isLoading={isLoading}
@@ -478,13 +453,23 @@ export default function Home() {
             </div>
           </section>
 
-          {/* Policy-violation matrix */}
-          <section id="harness" aria-label="Policy-violation matrix" className="mt-12 scroll-mt-6">
+          {/* Walk test + lead state */}
+          <section id="run" aria-label="Walk test and proof status" className="mt-14 grid gap-4 lg:grid-cols-2 scroll-mt-6">
+            <DemoRunner onRunLegitDemo={runLegitDemo} onRunAttackDemo={runAttackDemo} isRunning={isLoading} />
+            <ZKProofIndicator
+              status={zkStatus}
+              proofData={zkProofData}
+              agentName={agents.find((a) => a.id === activeAgentId)?.name}
+            />
+          </section>
+
+          {/* Pull test */}
+          <section id="harness" aria-label="Pull test" className="mt-4 scroll-mt-6">
             <PromptInjectionMatrix />
           </section>
 
-          {/* Settlement Audit Log */}
-          <section id="audit" aria-label="Settlement audit log" className="mt-4 scroll-mt-6">
+          {/* Walk log, this gateway */}
+          <section id="audit" aria-label="Walk log for this gateway" className="mt-4 scroll-mt-6">
             {captureError && (
               <div role="alert" className="mb-3 rounded-2xl bg-no-soft px-4 py-3 text-[14px] text-no break-words">
                 {captureError}
