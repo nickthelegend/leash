@@ -39,11 +39,12 @@ export async function POST(req: NextRequest) {
       success: true,
       ...proofResult,
     });
-  } catch (err: any) {
+  } catch (caught) {
+    const err = caught as { message?: string; name?: string; rule?: string } | undefined;
     // Setup problems (missing recipient, bb/nargo, keys) are not policy decisions: report them
     // as 503 "setup" so the UI never shows them as a circuit block.
-    const message = String(err?.message ?? err);
-    const isSetup = !(err instanceof PolicyViolation || err?.name === 'PolicyViolation');
+    const message = String(err?.message ?? caught);
+    const isSetup = !(caught instanceof PolicyViolation || err?.name === 'PolicyViolation');
     return NextResponse.json(
       {
         success: false,

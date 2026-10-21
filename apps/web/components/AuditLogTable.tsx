@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { CheckCircle2, XCircle, Clock, Shield, RefreshCw, ExternalLink, Hourglass } from 'lucide-react';
+import { CheckCircle2, XCircle, Clock, Shield, RefreshCw, ExternalLink, Hourglass, ArrowUpRight } from 'lucide-react';
 import { truncateHash } from '@/lib/utils';
 
 export interface AuditLogItem {
@@ -12,7 +12,8 @@ export interface AuditLogItem {
   merchantIdHash: string;
   nonce: string;
   proofVerified: boolean;
-  status: 'COMPLETED' | 'REJECTED' | 'FAILED' | 'AWAITING_APPROVAL';
+  /** FORWARDED: leash-mcp's proxy forwarded a proven call upstream that reported no order status. */
+  status: 'COMPLETED' | 'REJECTED' | 'FAILED' | 'AWAITING_APPROVAL' | 'FORWARDED';
   rejectionReason?: string;
   paypalOrderId?: string;
   paypalStatus?: string;
@@ -73,6 +74,16 @@ function StatusPill({ log }: { log: AuditLogItem }) {
     return (
       <span className="inline-flex items-center gap-1.5 h-7 px-3 rounded-full text-[12px] font-medium bg-sun-soft text-sun whitespace-nowrap">
         <Hourglass className="w-3.5 h-3.5" aria-hidden="true" /> Awaiting approval
+      </span>
+    );
+  }
+  if (log.status === 'FORWARDED') {
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 h-7 px-3 rounded-full text-[12px] font-medium bg-sun-soft text-sun whitespace-nowrap"
+        title="Proven and forwarded to the upstream PayPal tool; no order status came back"
+      >
+        <ArrowUpRight className="w-3.5 h-3.5" aria-hidden="true" /> Forwarded
       </span>
     );
   }

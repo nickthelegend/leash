@@ -9,6 +9,10 @@ import { ZKProofIndicator, ZKStatus, ZKProofData } from '@/components/ZKProofInd
 import { AgentCard, AgentConfig } from '@/components/AgentCard';
 import { AuditLogTable, AuditLogItem } from '@/components/AuditLogTable';
 import { PromptInjectionMatrix } from '@/components/PromptInjectionMatrix';
+import type { MerchantLeaf, Receipt } from '@leash/core';
+
+/** What the console needs from a committed policy (the full object goes back to the owner-device prover). */
+type CommittedPolicy = { policyCommitment: string; maxPerTxCents: number; merchantLeaves?: Pick<MerchantLeaf, 'name' | 'paypalMerchantId'>[] };
 
 // Example policies for the owner device. Names describe what each would pay for; no model is claimed.
 const INITIAL_AGENTS: AgentConfig[] = [
@@ -62,7 +66,7 @@ export default function Home() {
       if (res.ok) {
         const data = await res.json();
         setReceiptLogs(
-          (data.receipts ?? []).map((r: any) => ({
+          ((data.receipts ?? []) as Receipt[]).map((r) => ({
             id: `${r.policyId}:${r.nonce}`,
             timestamp: r.ts,
             policyCommitment: r.policyId,
@@ -119,9 +123,9 @@ export default function Home() {
   };
 
   // Commit each agent's policy (cap + allowlist) server-side; the commitment is real Pedersen output.
-  const policiesRef = React.useRef<Record<string, unknown>>({});
+  const policiesRef = React.useRef<Record<string, CommittedPolicy>>({});
   const [policyError, setPolicyError] = useState<string | null>(null);
-  const commitPolicy = useCallback(async (agent: AgentConfig) => {
+  const commitPolicy = useCallback(async (agent: AgentConfig): Promise<CommittedPolicy> => {
     const res = await fetch('/api/policies', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -174,8 +178,7 @@ export default function Home() {
   const executePayment = async (
     agentId: string,
     merchantName: string,
-    amountCents: number,
-    label?: string
+    amountCents: number
   ) => {
     const targetAgent = agents.find((a) => a.id === agentId) || agents[0];
     setActiveAgentId(targetAgent.id);
@@ -188,7 +191,7 @@ export default function Home() {
     setNonceCounter((prev) => prev + 1);
 
     try {
-      const policy: any =
+      const policy: CommittedPolicy =
         policiesRef.current[targetAgent.id] ?? (await commitPolicy(targetAgent));
       const spend = spendFor(targetAgent.id);
       // 1. Owner-device prover: real UltraHonk proof (needs the policy secrets, never sent to the gateway)
@@ -267,7 +270,7 @@ export default function Home() {
 
         // 2. Release through the verify-only gateway: it re-verifies, checks the spend chain and the
         // PayPal payee, then creates the order (approve link above the threshold, vault capture below).
-        const leaf = policy.merchantLeaves?.find((m: any) => m.name === merchantName.trim().toLowerCase());
+        const leaf = policy.merchantLeaves?.find((m) => m.name === merchantName.trim().toLowerCase());
         const payRes = await fetch('/api/pay', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -314,9 +317,9 @@ export default function Home() {
             verifyData.error || `Verifier rejected the proof (HTTP ${verifyRes.status})`,
         });
       }
-    } catch (err: any) {
+    } catch (err) {
       setZkStatus('rejected');
-      const message = String(err?.message ?? err);
+      const message = String((err as Error)?.message ?? err);
       setZkProofData({
         setupError: /not configured/i.test(message),
         rejectionReason: message,
@@ -328,11 +331,11 @@ export default function Home() {
 
   // Demo helpers for DemoRunner
   const runLegitDemo = async () => {
-    await executePayment(agents[0].id, 'openai', 300, 'Legit inference spend');
+    await executePayment(agents[0].id, 'openai', 300);
   };
 
   const runAttackDemo = async () => {
-    await executePayment(agents[0].id, 'openai', 50000, 'Cap override injection');
+    await executePayment(agents[0].id, 'openai', 50000);
   };
 
   // Derived from the gateway receipts only; nothing here is invented.

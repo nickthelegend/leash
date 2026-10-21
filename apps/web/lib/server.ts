@@ -30,7 +30,7 @@ export function publicBaseUrl(req: NextRequest): string {
 }
 
 export function errorResponse(err: unknown): NextResponse {
-  if (err instanceof GatewayError || (err as any)?.name === 'GatewayError') {
+  if (err instanceof GatewayError || (err as { name?: string } | null)?.name === 'GatewayError') {
     const e = err as GatewayError;
     return NextResponse.json({ success: false, error: e.message, ...e.extra }, { status: e.status });
   }

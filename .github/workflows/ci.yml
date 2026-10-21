@@ -21,6 +21,26 @@ jobs:
         working-directory: contracts
         run: forge test -vv
 
+  web:
+    name: web lint + build
+    runs-on: ubuntu-latest
+    env:
+      NEXT_TELEMETRY_DISABLED: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @leash/core build
+      - name: next lint (next/core-web-vitals + next/typescript, apps/web/eslint.config.mjs)
+        run: pnpm --filter web lint
+      - run: pnpm --filter web build
+
   full:
     name: pnpm test (packages + circuits + contracts)
     runs-on: ubuntu-latest

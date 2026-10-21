@@ -20,7 +20,7 @@ interface AgentCardProps {
   spentTodayCents: number;
   dailyCapCents: number;
   onCapChange: (agentId: string, newCapCents: number) => void;
-  onTriggerPayment: (agentId: string, merchant: string, amountCents: number, label: string) => void;
+  onTriggerPayment: (agentId: string, merchant: string, amountCents: number) => void;
   isLoading?: boolean;
   activeAgentId?: string | null;
 }
@@ -135,7 +135,7 @@ export function AgentCard({
       <div className="mt-auto pt-5 grid grid-cols-2 gap-2">
         <button
           type="button"
-          onClick={() => onTriggerPayment(agent.id, merchant, legitAmount, `Pay ${legitAmount} cents to ${merchant}`)}
+          onClick={() => onTriggerPayment(agent.id, merchant, legitAmount)}
           disabled={isLoading}
           className="btn btn-dark btn-sm !px-3 w-full"
         >
@@ -143,7 +143,7 @@ export function AgentCard({
         </button>
         <button
           type="button"
-          onClick={() => onTriggerPayment(agent.id, merchant, 50000, `Tug: 50000 cents to ${merchant}`)}
+          onClick={() => onTriggerPayment(agent.id, merchant, 50000)}
           disabled={isLoading}
           className="btn btn-line btn-sm !px-3 w-full"
         >

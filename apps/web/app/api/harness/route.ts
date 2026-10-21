@@ -15,11 +15,11 @@ export async function GET() {
       success: true,
       summary,
     });
-  } catch (err: any) {
+  } catch (err) {
     return NextResponse.json(
       {
         success: false,
-        error: err.message,
+        error: String((err as Error)?.message ?? err),
       },
       { status: 500 }
     );

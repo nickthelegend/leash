@@ -15,11 +15,11 @@ export async function GET() {
     return NextResponse.json(health, {
       status: health.status === 'ok' ? 200 : 503,
     });
-  } catch (err: any) {
+  } catch (err) {
     return NextResponse.json(
       {
         status: 'error',
-        error: err.message,
+        error: String((err as Error)?.message ?? err),
       },
       { status: 500 }
     );
@@ -66,10 +66,11 @@ export async function POST(req: NextRequest) {
       success: true,
       ...result,
     });
-  } catch (err: any) {
+  } catch (caught) {
+    const err = (caught ?? {}) as { message?: string; name?: string; code?: string };
     if (
-      err instanceof VerifierDependencyError ||
-      err instanceof VerifierKeyError ||
+      caught instanceof VerifierDependencyError ||
+      caught instanceof VerifierKeyError ||
       err.name === 'VerifierDependencyError' ||
       err.name === 'VerifierKeyError'
     ) {
@@ -86,7 +87,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    console.error('[LEASH Next API] Verification exception:', err);
+    console.error('[LEASH Next API] Verification exception:', caught);
     return NextResponse.json(
       {
         success: false,
