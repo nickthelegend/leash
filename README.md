@@ -26,8 +26,15 @@ pnpm install
 pnpm setup:tools   # pinned nargo 1.0.0-beta.16 + bb 3.0.1 into .tools; checks Foundry, jq, node
 pnpm test          # nargo + forge + @leash/core + @leash/mcp, every proof real; the live PayPal test skips without keys
 pnpm demo:anvil    # local Anvil with LeashVerifier + LeashPayment and the demo policy registered and funded
+pnpm demo:agent    # no LLM, no keys: leash-mcp releases 300 cents from escrow, then the 6 recorded refusals, verify:receipt, balances
 pnpm paypal:e2e    # through the verify-only gateway: register, prove, pay (order), buyer approves, capture, verify:receipt
 ```
+
+`pnpm demo:agent` is the recorded agent run replayed live by a plain MCP client (about 5 seconds):
+300 cents to openai's bound payee `0x7099…79C8` from the owner's escrow, then the per-payment cap,
+attacker-payee, daily-cap, replay and two `SumcheckFailed` refusals, each compared with the recording,
+then `verify:receipt 3001` and the balances (payee +300 wei, attacker +0). Stop the chain with
+`kill "$(cat .demo/anvil.pid)"`.
 
 The PayPal step needs sandbox credentials a judge supplies: `PAYPAL_CLIENT_ID`,
 `PAYPAL_CLIENT_SECRET` (a sandbox REST app) and `PAYPAL_PAYEE_MERCHANT_ID` (that app's sandbox

@@ -28,16 +28,18 @@ export default defineConfig({
     { name: 'chain', testMatch: /anvil-mcp\.spec\.ts/ },
     {
       name: 'desktop',
-      testIgnore: /(anvil-mcp|console-paypal)\.spec\.ts/,
+      testIgnore: /(anvil-mcp|console-paypal|demo-agent)\.spec\.ts/,
       dependencies: ['chain'],
       use: { viewport: { width: 1280, height: 800 } },
     },
     {
       name: 'mobile',
-      testIgnore: /(anvil-mcp|console-paypal|owner-device)\.spec\.ts/,
+      testIgnore: /(anvil-mcp|console-paypal|demo-agent|owner-device)\.spec\.ts/,
       dependencies: ['chain'],
       use: { viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true },
     },
+    // pnpm demo:anvil && pnpm demo:agent on its own fresh chain (no LLM, no keys)
+    { name: 'demo', testMatch: /demo-agent\.spec\.ts/ },
     // A second console with PAYPAL_PAYEE_MERCHANT_ID set (no client id): its payments go to the PayPal merchant.
     {
       name: 'paypal-merchant',

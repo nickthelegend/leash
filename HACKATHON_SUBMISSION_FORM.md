@@ -58,6 +58,7 @@ pnpm install
 pnpm setup:tools   # pinned nargo 1.0.0-beta.16 + bb 3.0.1 into .tools; checks Foundry and jq
 pnpm test          # every proof real; the live PayPal test skips without keys
 pnpm demo:anvil    # local chain with the demo policy
+pnpm demo:agent    # no LLM, no keys: 1 release + the 6 recorded refusals, verify:receipt, balances (~5 s)
 pnpm paypal:e2e    # the PayPal path
 ```
 For the PayPal path a judge supplies sandbox credentials in `.env.local`: `PAYPAL_CLIENT_ID`,

@@ -14,6 +14,7 @@
     "dev:gateway": "pnpm --filter @leash/core dev",
     "dev:web": "pnpm --filter web dev",
     "demo:anvil": "./scripts/demo-anvil.sh",
+    "demo:agent": "tsx scripts/demo-agent.ts",
     "start": "pnpm --filter @leash/core start",
     "verify:receipt": "tsx scripts/verify-receipt.ts",
     "paypal:e2e": "tsx scripts/paypal-sandbox-e2e.ts",
