@@ -112,7 +112,13 @@ capture is `COMPLETED` for exactly the proven cents.
   deterministic `PayPal-Request-Id: leash-<keccak(policyId, nonce)>-create` (78 chars for any nonce).
 - Approval: **human mode** returns the `payer-action` / `approve` link; **agent mode** charges a
   PayPal wallet the owner vaulted once (Vault v3 setup token -> payment token ->
-  `payment_source.paypal.vault_id`).
+  `payment_source.paypal.vault_id`). The vault id comes from `pnpm paypal:vault` (prints the approve
+  link, then the payment token; `--commitment 0x…` also registers it for a policy) or from the
+  console's **Save PayPal for agent mode** button, which sends the owner to PayPal and, on the
+  `?vault=return&approval_token_id=…` return, offers **Save for agent mode** for one of its policies.
+  When the buyer comes back from an order (`?paypal=return&token=<order id>`) the console shows which
+  order returned and offers its capture. Implemented and tested without keys (both say
+  `Setup required (PAYPAL_CLIENT_ID)`); no vault id has been created live yet.
 - `captureOrder(orderId)`: `PayPal-Request-Id: …-capture`; asserts order and capture `COMPLETED` and
   captured amount == proven cents.
 - Nothing is consumed until PayPal can run: the gateway gets a PayPal OAuth token (cached) before it

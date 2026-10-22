@@ -32,8 +32,12 @@ can be talked around; a spending limit held by the agent can be lied about.
 - The gateway verifies the proof with Barretenberg, checks the payee is the PayPal merchant it is
   about to pay, the nonce is fresh and the spend chain is current, then creates a PayPal Orders v2
   order (`custom_id` = keccak(policyId, nonce)). Above the owner's approval threshold the buyer
-  approves it; below it a vaulted wallet is charged. Paid only when the capture is COMPLETED for the
-  proven cents.
+  approves it; below it a wallet the owner vaulted (`pnpm paypal:vault` or the console's "Save PayPal
+  for agent mode") is charged. The vault path is implemented and tested without keys; no vault id has
+  been created live yet. Paid only when the capture is COMPLETED for the proven cents.
+- One daily cap per policy across rails: the circuit, contract and gateway each hold the spend chain
+  of their own rail, and leash-mcp refuses a payment when today's total on every rail plus the amount
+  is over the cap.
 - `leash-mcp` gives any MCP agent these tools, and can sit in front of PayPal's own agent toolkit MCP
   server as a proof-gated proxy. There, before forwarding `pay_order`, it re-reads the order with
   `get_order` and refuses unless the payee is the allowlisted merchant and the amount is exactly the
