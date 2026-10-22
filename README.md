@@ -268,7 +268,12 @@ leash-mcp's own `LEASH_MCP_LOG` entries (proof bytes shown as a length only). Ti
   without one (`registration.test.ts`, including `cast wallet verify` on the same signature).
 - **Daily cap without double-spend.** `LeashPayment` (and the gateway) store the latest spend
   commitment per policy and accept only a proof whose `prevCommit` matches it, so two proofs built on
-  the same running total can't both land (`DailyCap.t.sol`).
+  the same running total can't both land (`DailyCap.t.sol`). That chain is **per settlement rail**:
+  the circuit, the contract and the gateway each enforce the cap for their own rail. The cap across
+  rails is enforced by `leash-mcp`, which keeps one record per rail and refuses a payment (before
+  proving, and again before sending) when today's total on all rails (chain, PayPal gateway, PayPal
+  MCP proxy) plus the amount is over the policy's cap: `Daily cap reached across rails: …`
+  (`packages/leash-mcp/test/cross-rail.test.ts`, on a real Anvil chain and gateway).
 
 ## Testing
 

@@ -372,7 +372,7 @@ const FAQ: Array<{ q: string; a: string }> = [
   },
   {
     q: 'Can an agent split a big payment into small ones?',
-    a: 'Only up to the daily cap. Each proof opens the previous spend commitment and commits to the new total, and the contract (or gateway) stores the latest one, so two proofs built on the same total can’t both land.',
+    a: 'Only up to the daily cap. Each proof opens the previous spend commitment and commits to the new total, and the contract (or gateway) stores the latest one, so two proofs built on the same total can’t both land. The circuit, contract and gateway hold one spend chain per settlement rail; leash-mcp adds up every rail a policy pays on (chain, PayPal gateway, PayPal MCP proxy) and refuses a payment that takes the total over the cap.',
   },
   {
     q: 'Is this on a public network?',
