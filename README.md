@@ -26,7 +26,7 @@ pnpm install
 pnpm setup:tools   # pinned nargo 1.0.0-beta.16 + bb 3.0.1 into .tools; checks Foundry, jq, node
 pnpm test          # nargo + forge + @leash/core + @leash/mcp, every proof real; the live PayPal test skips without keys
 pnpm demo:anvil    # local Anvil with LeashVerifier + LeashPayment and the demo policy registered and funded
-pnpm paypal:e2e    # proof -> PayPal order -> buyer approves -> capture checked against the proven cents
+pnpm paypal:e2e    # through the verify-only gateway: register, prove, pay (order), buyer approves, capture, verify:receipt
 ```
 
 The PayPal step needs sandbox credentials a judge supplies: `PAYPAL_CLIENT_ID`,
@@ -116,7 +116,11 @@ capture is `COMPLETED` for exactly the proven cents.
   recipient, proofKeccak, vkHash, paypalOrderId, captureId, custom_id, ts, …}`; `GET /api/receipts/:nonce`.
   `pnpm verify:receipt <nonce>` re-runs `bb verify` on the stored proof, checks every field and, with
   keys, fetches the PayPal order and compares `custom_id` and the captured amount.
-- `pnpm paypal:e2e`: proof -> create -> approve link (or `--vault <id>`) -> capture, printing the ids.
+- `pnpm paypal:e2e` runs the one sandbox order through the same verify-only `PayGateway` the console and
+  leash-mcp use (`packages/core/src/paypal/sandboxRun.ts`): in-process owner registration -> proof ->
+  `gateway.pay` (bb verify, nonce, spend chain, payee binding, order with `custom_id`) -> approve link
+  (or `--vault <id>`) -> `gateway.capture` -> receipt in `<LEASH_HOME>/gateway` -> `pnpm verify:receipt`
+  on that nonce, printing the ids.
   Without keys it prints `Setup required (PAYPAL_CLIENT_ID)`, a numbered checklist of what to create
   in the PayPal Developer Dashboard (sandbox business + personal accounts, a REST app, the Vault
   feature for agent mode, which env vars), makes no PayPal call and exits 1.
