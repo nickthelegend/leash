@@ -136,6 +136,14 @@ describe('LEASH Noir Verifier Service', () => {
         const data = await res.json();
         expect(data.status).toBe('ok');
         expect(data.bb.available).toBe(true);
+        expect(data.keys.vkHash).toMatch(/^0x[0-9a-f]+$/);
+        // No filesystem paths over HTTP (bb location, key path, circuits dir)
+        const text = JSON.stringify(data);
+        expect(text).not.toContain(path.resolve(__dirname, '../../..'));
+        expect(text).not.toMatch(/"\/[^"]*"/);
+        expect(data.bb.path).toBeUndefined();
+        expect(data.keys.vkPath).toBeUndefined();
+        expect(data.circuits.dir).toBeUndefined();
       } finally {
         server.close();
       }
@@ -256,6 +264,8 @@ describe('LEASH Noir Verifier Service', () => {
         const data = await res.json();
         expect(data.fatal).toBe(true);
         expect(data.errorType).toBe('VERIFIER_KEY_MISSING');
+        expect(data.error).toBe('Verification key or compiled circuit missing on this server; the operator has the details in the server log.');
+        expect(JSON.stringify(data)).not.toContain(empty);
       } finally {
         server.close();
         if (prev === undefined) delete process.env.LEASH_CIRCUITS_DIR;

@@ -3,8 +3,9 @@ import {
   verifyPaymentProof,
   VerifierDependencyError,
   VerifierKeyError,
-  checkVerifierHealth,
   proofInputProblem,
+  publicVerifierErrorMessage,
+  publicVerifierHealth,
 } from '@leash/core';
 import { readJsonBody } from '@/lib/server';
 
@@ -13,7 +14,7 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    const health = checkVerifierHealth();
+    const health = publicVerifierHealth();
     return NextResponse.json(health, {
       status: health.status === 'ok' ? 200 : 503,
     });
@@ -87,7 +88,7 @@ export async function POST(req: NextRequest) {
           valid: false,
           fatal: true,
           errorType: err.code || 'FATAL_VERIFIER_ERROR',
-          error: err.message,
+          error: publicVerifierErrorMessage(err),
         },
         { status: 503 }
       );

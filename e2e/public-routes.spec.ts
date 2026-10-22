@@ -86,6 +86,16 @@ test.describe('public POST routes: body cap, JSON only, no cross-site, exact pro
     expect(evmSized.json.error).toMatch(/^Barretenberg verification failed/);
   });
 
+  test('GET /api/verify (health) shows booleans, the vk hash and the bb version, but no filesystem path', async ({ request }) => {
+    const res = await request.get('/api/verify');
+    expect(res.status()).toBe(200);
+    const h = await res.json();
+    expect(h).toMatchObject({ status: 'ok', bb: { available: true }, keys: { vkExists: true, evmVkExists: true }, circuits: { bytecodeExists: true } });
+    expect(h.keys.vkHash).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(JSON.stringify(h)).not.toMatch(/"\/[^"]*"/);
+    expect(JSON.stringify(h)).not.toContain(process.cwd());
+  });
+
   test('/api/pay: 400 for a proof that is not hex of the exact size', async () => {
     const r = await post('/api/pay', JSON_TYPE, JSON.stringify({ owner: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266', proofHex: '00', publicInputsHex: '00'.repeat(256), paypalMerchantId: 'ABCDEFGHJKLMN' }));
     expect(r.status).toBe(400);

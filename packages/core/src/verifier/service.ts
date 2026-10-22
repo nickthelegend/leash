@@ -2,8 +2,9 @@ import cors from 'cors';
 import express, { Express, Request, Response, Router } from 'express';
 import {
   assertVerifierDependencies,
-  checkVerifierHealth,
   proofInputProblem,
+  publicVerifierErrorMessage,
+  publicVerifierHealth,
   VerifierDependencyError,
   VerifierKeyError,
   verifyPaymentProof,
@@ -18,7 +19,7 @@ export function createVerifierRouter(): Router {
    * Returns 503 if any dependency or key is missing, failing loudly.
    */
   router.get(['/health', '/api/verify/health'], (_req: Request, res: Response) => {
-    const health = checkVerifierHealth();
+    const health = publicVerifierHealth();
     if (health.status !== 'ok') {
       res.status(503).json(health);
       return;
@@ -92,7 +93,7 @@ export function createVerifierRouter(): Router {
           valid: false,
           fatal: true,
           errorType: err.code || 'FATAL_VERIFIER_ERROR',
-          error: err.message,
+          error: publicVerifierErrorMessage(err),
         });
         return;
       }

@@ -470,3 +470,36 @@ export function verifyPaymentProof(
     }
   }
 }
+
+/** Verifier health as served over HTTP: booleans, the vk hash and the bb version, no filesystem paths. */
+export interface PublicVerifierHealth {
+  status: VerifierHealthStatus['status'];
+  service: string;
+  version: string;
+  bb: { available: boolean; version?: string };
+  keys: { vkExists: boolean; vkHash?: string; evmVkExists: boolean };
+  circuits: { bytecodeExists: boolean };
+  error?: string;
+}
+
+export function publicVerifierHealth(h: VerifierHealthStatus = checkVerifierHealth()): PublicVerifierHealth {
+  return {
+    status: h.status,
+    service: h.service,
+    version: h.version,
+    bb: { available: h.bb.available, version: h.bb.version },
+    keys: { vkExists: h.keys.vkExists, vkHash: h.keys.vkHash, evmVkExists: h.keys.evmVkExists },
+    circuits: { bytecodeExists: h.circuits.bytecodeExists },
+    error: h.error,
+  };
+}
+
+/**
+ * What an HTTP client is told about a missing bb or key. The full message (with the server's paths and
+ * the command that fixes it) goes to the server log only.
+ */
+export function publicVerifierErrorMessage(err: { code?: string; name?: string }): string {
+  return err.code === 'VERIFIER_DEPENDENCY_MISSING' || err.name === 'VerifierDependencyError'
+    ? 'Barretenberg (bb) is not installed on this server; the operator has the details in the server log.'
+    : 'Verification key or compiled circuit missing on this server; the operator has the details in the server log.';
+}
