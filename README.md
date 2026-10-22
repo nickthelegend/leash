@@ -159,7 +159,9 @@ Environment (names only): `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPAL_EN
 (`sandbox` default), `PAYPAL_PAYEE_MERCHANT_ID` (sandbox business account that receives payments; adds
 a PayPal merchant to the default allowlist), `PAYPAL_ACCESS_TOKEN` (proxy only), `LEASH_GATEWAY_URL`,
 `LEASH_POLICY_OWNER_ADDRESS`, `LEASH_CONSOLE_OWNER` (owner of the console's policies), `LEASH_HOME`
-(owner-device state, default `.leash/`, gitignored), `LEASH_OWNER_DEVICE`, `LEASH_DAILY_CAP_CENTS`,
+(owner-device state, default `.leash/`, gitignored; its `policy.json` is created once and never
+replaced: a process whose `LEASH_DAILY_CAP_CENTS` or `PAYPAL_PAYEE_MERCHANT_ID` differs from the one
+that created it gets an error naming the setting), `LEASH_OWNER_DEVICE`, `LEASH_DAILY_CAP_CENTS`,
 `LEASH_PUBLIC_URL`, and the EVM rail's `LEASH_RPC_URL`,
 `LEASH_PAYMENT_CONTRACT_ADDRESS`, `LEASH_SENDER_ADDRESS`, `LEASH_PAY_FROM_ESCROW`.
 

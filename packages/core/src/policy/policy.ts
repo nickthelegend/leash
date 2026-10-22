@@ -174,11 +174,17 @@ export const DEMO_SPEND_SALT = '123456789';
 
 let cachedDefault: { key: string; policy: SpendingPolicy } | null = null;
 
+/** "name" or "name(PAYPALMERCHANTID)": how an allowlist entry is compared and reported. */
+const entryLabel = (m: { name: string; paypalMerchantId?: string }) => (m.paypalMerchantId ? `${m.name}(${m.paypalMerchantId})` : m.name);
+
 /**
  * The owner's default policy (cap $5.00 per payment, $15.00 per day; LEASH_DAILY_CAP_CENTS overrides
  * the daily cap).
  *  - default: random salts, created once and kept in <LEASH_HOME>/policy.json (mode 0600) so every
- *    process on the owner device proves against the same commitment.
+ *    process on the owner device proves against the same commitment. The file is **never replaced**:
+ *    its salts are the only way to spend from the registered, funded policy. A process configured
+ *    with another daily cap or allowlist (e.g. PAYPAL_PAYEE_MERCHANT_ID set in only one process's env)
+ *    gets a readable error instead of a new policy.
  *  - demo (`--demo` / LEASH_DEMO=1): the fixed, publicly known salt 987654321. For recordings and
  *    tests only: anyone can brute-force a demo policy's allowlist from its commitment.
  */
@@ -194,16 +200,41 @@ export function getDefaultPolicy(opts?: { demo?: boolean }): SpendingPolicy {
     policy = createSpendingPolicy({ ...base, policySalt: DEMO_POLICY_SALT, spendSalt: DEMO_SPEND_SALT });
   } else {
     const file = path.join(leashHome(), 'policy.json');
-    const stored = fs.existsSync(file) ? (JSON.parse(fs.readFileSync(file, 'utf8')) as SpendingPolicy) : undefined;
-    const sameMerchants =
-      stored && JSON.stringify(stored.merchants) === JSON.stringify(base.merchants.map((m) => m.name));
-    if (stored && sameMerchants && stored.dailyCapCents === dailyCapCents) {
-      policy = stored;
+    const read = () => checkStoredPolicy(file, JSON.parse(fs.readFileSync(file, 'utf8')) as SpendingPolicy, base);
+    if (fs.existsSync(file)) {
+      policy = read();
     } else {
-      policy = createSpendingPolicy(base);
-      fs.writeFileSync(file, JSON.stringify(policy, null, 2), { mode: 0o600 });
+      const created = createSpendingPolicy(base);
+      try {
+        // 'wx': create only; if another process wrote it first, use (and check) theirs.
+        fs.writeFileSync(file, JSON.stringify(created, null, 2), { mode: 0o600, flag: 'wx' });
+        policy = created;
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+        policy = read();
+      }
     }
   }
   cachedDefault = { key, policy };
   return policy;
+}
+
+function checkStoredPolicy(
+  file: string,
+  stored: SpendingPolicy,
+  want: { maxPerTxCents: number; dailyCapCents: number; merchants: MerchantEntry[] }
+): SpendingPolicy {
+  const have = (stored.merchantLeaves ?? []).map(entryLabel);
+  const wanted = want.merchants.map((m) => entryLabel({ name: m.name.trim().toLowerCase(), paypalMerchantId: m.paypalMerchantId }));
+  const sameMerchants = JSON.stringify(have) === JSON.stringify(wanted);
+  if (sameMerchants && stored.dailyCapCents === want.dailyCapCents && stored.maxPerTxCents === want.maxPerTxCents) return stored;
+  const hints = [
+    stored.dailyCapCents !== want.dailyCapCents ? `set LEASH_DAILY_CAP_CENTS=${stored.dailyCapCents}` : '',
+    sameMerchants ? '' : 'use the same PAYPAL_PAYEE_MERCHANT_ID as the process that created it',
+  ].filter(Boolean);
+  throw new Error(
+    `${file} was created with daily cap ${stored.dailyCapCents} cents and merchants [${have.join(', ')}], ` +
+      `but this process wants daily cap ${want.dailyCapCents} cents and merchants [${wanted.join(', ')}]. ` +
+      `It is never overwritten (its salts are the only way to spend from that policy): ${hints.join(' and ')} or move it aside.`
+  );
 }
