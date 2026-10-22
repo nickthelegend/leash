@@ -9,8 +9,8 @@ import type { Page } from '@playwright/test';
 
 const HEX64 = /0x[0-9a-f]{64}/;
 
-async function openConsole(page: Page) {
-  await page.goto('/#console');
+async function openConsole(page: Page, url = '/#console') {
+  await page.goto(url);
   const tags = page.locator('article.tag-card');
   await expect(tags).toHaveCount(3);
   // Every tag gets a real commitment from the server (POST /api/policies -> nargo)
@@ -348,8 +348,7 @@ test('capture: an answer that is not JSON (a crashed route) is shown as an error
 });
 
 test('PayPal order return (?paypal=return&token=…): a banner says which order came back, and that no receipt here has it', async ({ page }) => {
-  await page.goto('/?paypal=return&token=TESTORDER#audit');
-  await openConsole(page);
+  await openConsole(page, '/?paypal=return&token=TESTORDER#audit');
   const banner = page.getByRole('region', { name: 'PayPal return' });
   await expect(banner.getByRole('heading', { name: 'Back from PayPal: order TESTORDER' })).toBeVisible();
   await expect(banner).toContainText('No receipt on this console has order TESTORDER, so there is nothing to capture here.');
@@ -370,8 +369,7 @@ test('agent mode: "Save PayPal for agent mode" and the vault return banner reach
   await card.getByRole('button', { name: 'Save PayPal for agent mode' }).click();
   await expect(card.getByRole('alert')).toHaveText('Setup required (PAYPAL_CLIENT_ID)');
   // PayPal's Vault v3 return: ?vault=return&approval_token_id=<setup token>
-  await page.goto('/?vault=return&approval_token_id=8XY12345AB678901C#audit');
-  await openConsole(page);
+  await openConsole(page, '/?vault=return&approval_token_id=8XY12345AB678901C#audit');
   const banner = page.getByRole('region', { name: 'PayPal return' });
   await expect(banner.getByRole('heading', { name: 'Back from PayPal: wallet approved for agent mode' })).toBeVisible();
   await expect(banner).toContainText('8XY12345AB678901C');
