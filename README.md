@@ -109,7 +109,7 @@ capture is `COMPLETED` for exactly the proven cents.
 
 - `createOrder(proof)`: `intent: CAPTURE`, `purchase_units[0].payee.merchant_id` from the allowlist
   entry, `custom_id = keccak256(abi.encode(policyId, nonce))`, `invoice_id = leash-<policyId>-<nonce>`,
-  deterministic `PayPal-Request-Id: leash-<policyId>-<nonce>-create`.
+  deterministic `PayPal-Request-Id: leash-<keccak(policyId, nonce)>-create` (78 chars for any nonce).
 - Approval: **human mode** returns the `payer-action` / `approve` link; **agent mode** charges a
   PayPal wallet the owner vaulted once (Vault v3 setup token -> payment token ->
   `payment_source.paypal.vault_id`).

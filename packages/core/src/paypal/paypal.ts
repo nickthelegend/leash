@@ -4,7 +4,8 @@
  *
  *   custom_id   = keccak256(abi.encode(policyId, nonce))     (hidden from the payer, in reports)
  *   invoice_id  = leash-<policyId>-<nonce>                     (unique per merchant account)
- *   PayPal-Request-Id = leash-<policyId>-<nonce>-create / -capture   (idempotent retries)
+ *   PayPal-Request-Id = leash-<keccak256(abi.encode(policyId, nonce)) as 64 hex>-create / -capture
+ *                       (idempotent retries; 78 chars for any nonce)
  *
  * Field names and limits are from the Orders v2 OpenAPI schema,
  * https://developer.paypal.com/api/orders/v2/schema.json :
@@ -127,9 +128,14 @@ export function leashInvoiceId(policyId: string, nonce: string): string {
   return id;
 }
 
-/** Deterministic PayPal-Request-Id so a retried create/capture can never double-charge. */
+/**
+ * Deterministic PayPal-Request-Id so a retried create/capture can never double-charge. Built from the
+ * hash of (policyId, nonce), so it is 78 characters for every nonce: the Orders v2 schema allows 10000,
+ * PayPal's older API reference listed 1..108 (the vault call below caps at 108 too), and a
+ * leash-<policyId>-<nonce>-capture id passed 108 from a 28-digit nonce on.
+ */
 export function leashRequestId(policyId: string, nonce: string, step: 'create' | 'capture'): string {
-  return `leash-${policyId.toLowerCase()}-${nonce}-${step}`;
+  return `leash-${keccakWords(policyId, nonce).slice(2, 66)}-${step}`;
 }
 
 /** 300 -> "3.00" (amount.value is a decimal string). */

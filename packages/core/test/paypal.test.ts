@@ -46,8 +46,17 @@ describe('PayPal Orders v2 builders (pure)', () => {
     expect(leashCustomId(POLICY_ID, '3001')).toBe(keccakWords(POLICY_ID, 3001n));
     expect(leashInvoiceId(POLICY_ID, '3001')).toBe(`leash-${POLICY_ID}-3001`);
     expect(leashInvoiceId(POLICY_ID, '3001').length).toBeLessThanOrEqual(127);
-    expect(leashRequestId(POLICY_ID, '3001', 'create')).toBe(`leash-${POLICY_ID}-3001-create`);
-    expect(leashRequestId(POLICY_ID, '3001', 'capture')).toBe(`leash-${POLICY_ID}-3001-capture`);
+    const h = keccakWords(POLICY_ID, 3001n).slice(2);
+    expect(leashRequestId(POLICY_ID, '3001', 'create')).toBe(`leash-${h}-create`);
+    expect(leashRequestId(POLICY_ID, '3001', 'capture')).toBe(`leash-${h}-capture`);
+    expect(leashRequestId(POLICY_ID, '3002', 'create')).not.toBe(leashRequestId(POLICY_ID, '3001', 'create'));
+  });
+
+  it('request ids stay within 108 characters for the longest nonce NONCE_RE accepts (30 digits)', () => {
+    for (const nonce of ['9'.repeat(27), '9'.repeat(28), '9'.repeat(29), '9'.repeat(30)]) {
+      expect(leashRequestId(POLICY_ID, nonce, 'create').length, nonce.length + ' digits').toBeLessThanOrEqual(108);
+      expect(leashRequestId(POLICY_ID, nonce, 'capture').length, nonce.length + ' digits').toBeLessThanOrEqual(108);
+    }
   });
 
   it('converts cents exactly', () => {
@@ -95,8 +104,9 @@ describe('PayPal Orders v2 builders (pure)', () => {
   });
 
   it('headers carry the deterministic PayPal-Request-Id', () => {
-    expect(buildCreateOrderHeaders(proven, 'T')['PayPal-Request-Id']).toBe(`leash-${POLICY_ID}-3001-create`);
-    expect(buildCaptureHeaders(proven, 'T')['PayPal-Request-Id']).toBe(`leash-${POLICY_ID}-3001-capture`);
+    expect(buildCreateOrderHeaders(proven, 'T')['PayPal-Request-Id']).toBe(leashRequestId(POLICY_ID, '3001', 'create'));
+    expect(buildCaptureHeaders(proven, 'T')['PayPal-Request-Id']).toBe(leashRequestId(POLICY_ID, '3001', 'capture'));
+    expect(buildCaptureHeaders(proven, 'T')['PayPal-Request-Id']).toMatch(/^leash-[0-9a-f]{64}-capture$/);
     expect(buildCreateOrderHeaders(proven, 'T').Authorization).toBe('Bearer T');
   });
 
@@ -201,12 +211,12 @@ describe('PayPal fields match the documented schema', () => {
     }
   });
 
-  it('Prefer is a documented value and PayPal-Request-Id fits the Orders limit (1..10000)', () => {
+  it('Prefer is a documented value and PayPal-Request-Id fits the Orders limits (schema 1..10000, older reference 1..108)', () => {
     const long = { ...proven, nonce: '9'.repeat(30) };
     for (const h of [buildCreateOrderHeaders(long, 'T'), buildCaptureHeaders(long, 'T')]) {
       expect(['return=minimal', 'return=representation']).toContain(h.Prefer);
       expect(h['PayPal-Request-Id'].length).toBeGreaterThan(0);
-      expect(h['PayPal-Request-Id'].length).toBeLessThanOrEqual(10000);
+      expect(h['PayPal-Request-Id'].length).toBeLessThanOrEqual(108);
       expect(Object.keys(h).sort()).toEqual(['Authorization', 'Content-Type', 'PayPal-Request-Id', 'Prefer']);
     }
   });
