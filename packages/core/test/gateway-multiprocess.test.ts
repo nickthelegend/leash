@@ -122,3 +122,44 @@ describe('check-and-consume across processes', () => {
     }
   }, 180_000);
 });
+
+// A lock left by a dead process is broken by whoever finds it stale. When several waiters find it stale
+// at once, only the stale lock may be removed, never the fresh one another waiter just created.
+describe('withFileLock: breaking a stale lock', () => {
+  it('four processes that all find the same dead-pid lock never hold the lock at the same time (25 rounds)', async () => {
+    const RECEIPTS_DIST = path.resolve(__dirname, '../dist/gateway/receipts.js');
+    const d = fs.mkdtempSync(path.join(dir, 'stale-'));
+    const file = path.join(d, 'shared.json');
+    const ROUNDS = 25;
+    const t0 = Date.now() + 2500;
+    const worker = (n: number) =>
+      new Promise<number>((resolve, reject) => {
+        const script = `
+          const fs = require('fs');
+          const { withFileLock } = require(process.env.R_DIST);
+          const file = process.env.FILE, inside = file + '.inside', n = Number(process.env.N);
+          const spin = (until) => { while (Date.now() < until) {} };
+          let overlaps = 0;
+          for (let i = 0; i < ${ROUNDS}; i++) {
+            const at = ${t0} + i * 250;
+            if (n === 0) { spin(at - 120); fs.writeFileSync(file + '.lock', '2147483646 2026-10-22T00:00:00.000Z'); }
+            spin(at);
+            withFileLock(file, () => {
+              try { fs.closeSync(fs.openSync(inside, 'wx')); } catch (e) { overlaps++; return; }
+              spin(Date.now() + 8);
+              fs.rmSync(inside, { force: true });
+            });
+          }
+          process.stdout.write(String(overlaps));`;
+        const c = spawn(process.execPath, ['-e', script], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, R_DIST: RECEIPTS_DIST, FILE: file, N: String(n) } });
+        let out = '';
+        let err = '';
+        c.stdout.on('data', (x) => (out += x));
+        c.stderr.on('data', (x) => (err += x));
+        c.on('exit', (code) => (code === 0 ? resolve(Number(out)) : reject(new Error(`worker ${n} exited ${code}: ${err}`))));
+      });
+    const overlaps = await Promise.all([0, 1, 2, 3].map(worker));
+    expect(overlaps).toEqual([0, 0, 0, 0]);
+    expect(fs.readdirSync(d).filter((f) => f.includes('.lock'))).toEqual([]);
+  }, 60_000);
+});

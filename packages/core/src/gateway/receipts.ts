@@ -83,6 +83,33 @@ function lockIsStale(lock: string, staleMs: number): boolean {
 }
 
 /**
+ * Remove `lock` only if it is still stale when re-checked under `<lock>.break` (O_EXCL). Without
+ * this, two waiters that both judged the same dead lock stale could each remove a lock: the second
+ * removal would hit the fresh lock the first one had just created, and both would enter. With it,
+ * the second waiter re-reads the lock under the guard, sees a live owner (or no lock) and leaves it.
+ * The guard is held for a few syscalls; one left by a process that died mid-break is cleared after 5 s.
+ */
+function breakStaleLock(lock: string, staleMs: number): void {
+  const guard = `${lock}.break`;
+  try {
+    fs.closeSync(fs.openSync(guard, 'wx', 0o600));
+  } catch (e: any) {
+    if (e?.code !== 'EEXIST') throw e;
+    try {
+      if (Date.now() - fs.statSync(guard).mtimeMs > 5_000) fs.rmSync(guard, { force: true });
+    } catch {
+      // the other breaker finished meanwhile
+    }
+    return;
+  }
+  try {
+    if (lockIsStale(lock, staleMs)) fs.rmSync(lock, { force: true });
+  } finally {
+    fs.rmSync(guard, { force: true });
+  }
+}
+
+/**
  * Run `fn` holding an exclusive lock on `file` (<file>.lock, created with O_EXCL), so a
  * read-modify-write by one process can't overwrite another's (the Express gateway and the Next console
  * share LEASH_HOME/gateway). Waits with backoff; a lock whose pid is dead or older than `staleMs` is
@@ -100,7 +127,7 @@ export function withFileLock<T>(file: string, fn: () => T, opts: { timeoutMs?: n
     } catch (e: any) {
       if (e?.code !== 'EEXIST') throw e;
       if (lockIsStale(lock, opts.staleMs ?? 15_000)) {
-        fs.rmSync(lock, { force: true });
+        breakStaleLock(lock, opts.staleMs ?? 15_000);
         continue;
       }
       if (Date.now() > deadline) throw new Error(`${lock} is held by another process (waited ${opts.timeoutMs ?? 10_000} ms)`);
