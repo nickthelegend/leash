@@ -25,3 +25,6 @@ e2e/playwright-report/
 test-results/
 playwright-report/
 packages/core/policy_circuit/target/*.gz
+
+# Internal agent notes (kept locally, not published)
+CLAUDE.md
