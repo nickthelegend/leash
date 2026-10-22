@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { generatePaymentProof, PolicyViolation, SpendingPolicy } from '@leash/core';
+import { generatePaymentProof, NONCE_RE, PolicyViolation, SpendingPolicy } from '@leash/core';
 import { ownerDeviceOnly } from '@/lib/server';
 
 export const runtime = 'nodejs';
@@ -22,6 +22,13 @@ export async function POST(req: NextRequest) {
       );
     }
     const activePolicy = policy as SpendingPolicy;
+
+    if (nonce !== undefined && (typeof nonce !== 'string' || !NONCE_RE.test(nonce))) {
+      return NextResponse.json(
+        { success: false, error: 'nonce must be a decimal integer string without leading zeros (1-30 digits)' },
+        { status: 400 }
+      );
+    }
 
     if (!merchantName || amountCents === undefined) {
       return NextResponse.json(

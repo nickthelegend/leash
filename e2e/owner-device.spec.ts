@@ -65,6 +65,14 @@ test.describe('owner-device routes answer only this machine’s console', () => 
     expect(r.json.proofHex).toBeUndefined();
   });
 
+  test('a hex, zero-padded or TOML-injection nonce: 400 before nargo runs', async () => {
+    for (const nonce of ['0x0bb9', '03001', '1"\nmax_per_tx = "1']) {
+      const r = await raw('POST', '/api/prove', { host: new URL(BASE).host, 'content-type': 'application/json' }, JSON.stringify({ policy, merchantName: 'openai', amountCents: 300, nonce }));
+      expect(r.status, nonce).toBe(400);
+      expect(r.json.error).toMatch(/^nonce must be a decimal integer string without leading zeros/);
+    }
+  });
+
   test('text/plain body (a cross-site form or no-cors fetch): 415, no proof', async () => {
     const r = await raw('POST', '/api/prove', { host: new URL(BASE).host, 'content-type': 'text/plain' }, proveBody(policy));
     expect(r.status).toBe(415);

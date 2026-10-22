@@ -51,13 +51,42 @@ const CIRCUIT_RULES: [RegExp, string][] = [
   [/Merchant ID hash mismatch/, 'MERCHANT_HASH'],
 ];
 
+/** A payment nonce: a canonical decimal integer (no sign, no leading zeros, no hex), 1-30 digits. */
+export const NONCE_RE = /^(0|[1-9][0-9]{0,29})$/;
+
+/** Throws unless `nonce` is a canonical decimal nonce (what the proof's public input will read back as). */
+export function assertNonce(nonce: unknown): string {
+  const s = typeof nonce === 'number' && Number.isSafeInteger(nonce) && nonce >= 0 ? String(nonce) : nonce;
+  if (typeof s !== 'string' || !NONCE_RE.test(s)) {
+    throw new Error(`nonce must be a decimal integer string without leading zeros (1-30 digits), got ${JSON.stringify(String(nonce)).slice(0, 40)}`);
+  }
+  return s;
+}
+
+/**
+ * Prover.toml for nargo. Every value is written as a TOML basic string through JSON.stringify (booleans
+ * as bare true / false), so a value can never close its quotes or start a new key. Pure; unit-tested.
+ */
+type TomlScalar = string | number | bigint | boolean;
+export function proverToml(values: [string, TomlScalar | TomlScalar[]][]): string {
+  const q = (v: TomlScalar) => (typeof v === 'boolean' ? String(v) : JSON.stringify(String(v)));
+  return values
+    .map(([k, v]) => {
+      if (!/^[a-z_]+$/.test(k)) throw new Error(`bad Prover.toml key ${k}`);
+      return Array.isArray(v) ? `${k} = [${v.map(q).join(', ')}]` : `${k} = ${q(v)}`;
+    })
+    .join('\n');
+}
+
 /**
  * Generates an UltraHonk proof with nargo + bb that the payment satisfies the policy:
  *   R1 merchant allowlist with its bound payee, R2 per-transaction cap, R4 rolling daily cap.
  */
 export function generatePaymentProof(req: PaymentProofRequest): PaymentProofResult {
   const startTime = Date.now();
-  const { policy, merchantName, amountCents, nonce, useEvmTarget } = req;
+  const { policy, merchantName, amountCents, useEvmTarget } = req;
+  const nonce = assertNonce(req.nonce);
+  if (!Number.isSafeInteger(amountCents) || amountCents <= 0) throw new Error(`amountCents must be a positive integer, got ${amountCents}`);
   const spend = req.spend ?? { epoch: currentEpoch(), prevSpendCommit: '0', spentBeforeCents: 0 };
 
   if (!req.skipPrechecks) {
@@ -93,25 +122,24 @@ export function generatePaymentProof(req: PaymentProofRequest): PaymentProofResu
   try {
     fs.writeFileSync(
       tempProverFile,
-      [
-        `policy_commitment = "${policy.policyCommitment}"`,
-        `amount = "${amountCents}"`,
-        `merchant_id_hash = "${merklePath.merchantIdHash}"`,
-        `nonce = "${nonce.toString()}"`,
-        `recipient = "${recipient}"`,
-        `epoch = "${spend.epoch}"`,
-        `prev_spend_commit = "${spend.prevSpendCommit}"`,
-        '',
-        `max_per_tx = "${policy.maxPerTxCents}"`,
-        `daily_cap = "${policy.dailyCapCents}"`,
-        `merkle_root = "${policy.merkleRoot}"`,
-        `policy_salt = "${policy.policySalt}"`,
-        `spend_salt = "${policy.spendSalt}"`,
-        `merchant_id = "${merklePath.merchantId}"`,
-        `spent_before = "${spend.spentBeforeCents}"`,
-        `merkle_path_indices = [${merklePath.pathIndices.join(', ')}]`,
-        `merkle_path_elements = [${merklePath.pathElements.map((e) => `"${e}"`).join(', ')}]`,
-      ].join('\n'),
+      proverToml([
+        ['policy_commitment', policy.policyCommitment],
+        ['amount', amountCents],
+        ['merchant_id_hash', merklePath.merchantIdHash],
+        ['nonce', nonce],
+        ['recipient', recipient],
+        ['epoch', spend.epoch],
+        ['prev_spend_commit', spend.prevSpendCommit],
+        ['max_per_tx', policy.maxPerTxCents],
+        ['daily_cap', policy.dailyCapCents],
+        ['merkle_root', policy.merkleRoot],
+        ['policy_salt', policy.policySalt],
+        ['spend_salt', policy.spendSalt],
+        ['merchant_id', merklePath.merchantId],
+        ['spent_before', spend.spentBeforeCents],
+        ['merkle_path_indices', merklePath.pathIndices],
+        ['merkle_path_elements', merklePath.pathElements],
+      ]),
       'utf-8'
     );
 

@@ -30,6 +30,7 @@ import {
   currentEpoch,
   generatePaymentProof,
   keccak256Hex,
+  NONCE_RE,
   proofKeccak,
   Receipt,
   ReceiptStore,
@@ -172,7 +173,7 @@ export class ProofGatedProxy {
 
   private async gatedCreate(tool: UpstreamTool, args: Record<string, any>): Promise<ToolResult> {
     const { nonce, merchant, ...upstreamArgs } = args;
-    if (typeof nonce !== 'string' || !/^[0-9]{1,30}$/.test(nonce)) return refuse('nonce (decimal string) is required for a payment tool');
+    if (typeof nonce !== 'string' || !NONCE_RE.test(nonce)) return refuse('nonce (decimal string, no leading zeros) is required for a payment tool');
     if (typeof merchant !== 'string' || !merchant.trim()) return refuse('merchant is required for a payment tool');
     if (this.receipts.isNonceUsed(this.opts.policyId, nonce)) return refuse(`nonce ${nonce} already used`);
     const amountCents = orderTotalCents(upstreamArgs);

@@ -17,6 +17,7 @@ import {
   getDefaultPolicy,
   isAddress,
   leashHome,
+  NONCE_RE,
   policyIdOf,
   proofKeccak,
   Receipt,
@@ -337,7 +338,7 @@ export const TOOLS = [
       properties: {
         merchant: { type: 'string', description: 'Merchant name, e.g. "openai"' },
         amountCents: { type: 'integer', minimum: 1, description: 'Amount in cents' },
-        nonce: { type: 'string', description: 'Unique nonce for this payment, as a decimal integer string' },
+        nonce: { type: 'string', pattern: '^(0|[1-9][0-9]{0,29})$', description: 'Unique nonce for this payment, as a decimal integer string (no leading zeros)' },
         recipient: {
           type: 'string',
           description: 'Payee 0x address; defaults to the payee the policy lists for this merchant',
@@ -383,6 +384,9 @@ export const TOOLS = [
 
 type ToolResult = { content: { type: 'text'; text: string }[]; isError?: boolean };
 
+/** Refused before anything runs (nargo never sees it). Same rule as the proof's public input. */
+const NONCE_HELP = 'nonce must be a decimal integer string without leading zeros (1-30 digits), e.g. "3001"';
+
 const ok = (value: unknown): ToolResult => ({
   content: [{ type: 'text', text: JSON.stringify(value, null, 2) }],
 });
@@ -413,8 +417,8 @@ export async function callTool(
         if (typeof amountCents !== 'number' || !Number.isInteger(amountCents) || amountCents <= 0) {
           return fail('amountCents must be a positive integer');
         }
-        if (typeof nonce !== 'string' || !nonce.trim()) {
-          return fail('nonce must be a non-empty string');
+        if (typeof nonce !== 'string' || !NONCE_RE.test(nonce)) {
+          return fail(NONCE_HELP);
         }
         const recipient = typeof args.recipient === 'string' ? args.recipient : undefined;
         const p = policy();
@@ -479,7 +483,7 @@ export async function callTool(
         });
       }
       case 'leash_execute_onchain': {
-        if (typeof args.nonce !== 'string' || !args.nonce.trim()) return fail('nonce must be a non-empty string');
+        if (typeof args.nonce !== 'string' || !NONCE_RE.test(args.nonce)) return fail(NONCE_HELP);
         const r = args.recipient;
         if (r !== undefined && (typeof r !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(r))) {
           return fail('recipient must be a 0x-prefixed 20-byte address');
@@ -487,11 +491,11 @@ export async function callTool(
         return executeOnchain(args.nonce, r as string | undefined);
       }
       case 'leash_pay_paypal': {
-        if (typeof args.nonce !== 'string' || !args.nonce.trim()) return fail('nonce must be a non-empty string');
+        if (typeof args.nonce !== 'string' || !NONCE_RE.test(args.nonce)) return fail(NONCE_HELP);
         return await payPaypal(args.nonce);
       }
       case 'leash_receipt': {
-        if (typeof args.nonce !== 'string' || !args.nonce.trim()) return fail('nonce must be a non-empty string');
+        if (typeof args.nonce !== 'string' || !NONCE_RE.test(args.nonce)) return fail(NONCE_HELP);
         return await findReceipt(args.nonce);
       }
       default:
