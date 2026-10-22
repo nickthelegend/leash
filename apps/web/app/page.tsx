@@ -50,7 +50,7 @@ export default function Home() {
   const [zkStatus, setZkStatus] = useState<ZKStatus>('idle');
   const [zkProofData, setZkProofData] = useState<ZKProofData | null>(null);
   const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
-  // Receipts come from the gateway (persisted); refusals and setup stops are this session's only.
+  // Receipts are persisted (gateway + this device's on-chain releases); refusals and setup stops are this session's only.
   const [receiptLogs, setReceiptLogs] = useState<AuditLogItem[]>([]);
   const [localLogs, setLocalLogs] = useState<AuditLogItem[]>([]);
   const logs = [...localLogs, ...receiptLogs].sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
@@ -60,32 +60,40 @@ export default function Home() {
   const [owner, setOwner] = useState<string | null>(null);
   const [captureError, setCaptureError] = useState<string | null>(null);
 
+  // Walk log load state: what the last receipts fetch returned, or why it failed (never swallowed).
+  const [receiptsStatus, setReceiptsStatus] = useState<{ count: number; at: string } | null>(null);
+  const [receiptsError, setReceiptsError] = useState<string | null>(null);
+
   const fetchLogs = useCallback(async () => {
     try {
       const res = await fetch('/api/receipts');
-      if (res.ok) {
-        const data = await res.json();
-        setReceiptLogs(
-          ((data.receipts ?? []) as Receipt[]).map((r) => ({
-            id: `${r.policyId}:${r.nonce}`,
-            timestamp: r.ts,
-            policyCommitment: r.policyId,
-            policyId: r.policyId,
-            amountCents: r.amountCents,
-            merchantIdHash: r.merchantIdHash,
-            nonce: r.nonce,
-            proofVerified: true,
-            status: r.status,
-            rejectionReason: r.error,
-            paypalOrderId: r.paypalOrderId,
-            paypalStatus: r.captureId ? `capture ${r.captureId}` : r.status,
-            approveUrl: r.approveUrl,
-            durationMs: 0,
-          }))
-        );
-      }
-    } catch {
-      // ignore
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      const receipts = (data.receipts ?? []) as Receipt[];
+      setReceiptLogs(
+        receipts.map((r) => ({
+          id: `${r.rail}:${r.policyId}:${r.nonce}`,
+          timestamp: r.ts,
+          policyCommitment: r.policyId,
+          policyId: r.policyId,
+          amountCents: r.amountCents,
+          merchantIdHash: r.merchantIdHash,
+          nonce: r.nonce,
+          proofVerified: true,
+          status: r.status,
+          rejectionReason: r.error,
+          paypalOrderId: r.paypalOrderId,
+          paypalStatus: r.captureId ? `capture ${r.captureId}` : r.status,
+          approveUrl: r.approveUrl,
+          rail: r.rail,
+          txHash: r.txHash,
+          durationMs: 0,
+        }))
+      );
+      setReceiptsError(null);
+      setReceiptsStatus({ count: receipts.length, at: new Date().toLocaleTimeString() });
+    } catch (err) {
+      setReceiptsError(`Could not load receipts: ${String((err as Error)?.message ?? err)}`);
     }
   }, []);
 
@@ -390,7 +398,7 @@ export default function Home() {
             <div className="cx-panel p-5 sm:p-7">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <span className="text-[18px] sm:text-[20px] font-semibold tracking-tighter2">This session&rsquo;s lead</span>
-                <span className="mono text-[12.5px] text-white/55">from the gateway&rsquo;s receipts</span>
+                <span className="mono text-[12.5px] text-white/55">from the receipts</span>
               </div>
               <div className="mt-5 flex flex-wrap items-baseline gap-x-4 gap-y-2">
                 <div
@@ -420,7 +428,7 @@ export default function Home() {
               </dl>
               <p className="mt-4 text-[12.5px] text-white/50">
                 A verified proof only counts as paid once PayPal reports the capture COMPLETED for exactly the proven
-                cents.
+                cents, or LeashPayment released them on the local Anvil chain (1 cent settles as 1 wei).
               </p>
             </div>
             <PayPalSetupCard orderId={latestOrder?.paypalOrderId} orderStatus={latestOrder?.paypalStatus} />
@@ -471,14 +479,21 @@ export default function Home() {
             <PromptInjectionMatrix />
           </section>
 
-          {/* Walk log, this gateway */}
-          <section id="audit" aria-label="Walk log for this gateway" className="mt-4 scroll-mt-6">
+          {/* Walk log, this console */}
+          <section id="audit" aria-label="Walk log for this console" className="mt-4 scroll-mt-6">
             {captureError && (
               <div role="alert" className="mb-3 rounded-2xl bg-no-soft px-4 py-3 text-[14px] text-no break-words">
                 {captureError}
               </div>
             )}
-            <AuditLogTable logs={logs} onRefresh={fetchLogs} onCapture={capture} isLoading={isLoading} />
+            <AuditLogTable
+              logs={logs}
+              onRefresh={fetchLogs}
+              onCapture={capture}
+              isLoading={isLoading}
+              loadedReceipts={receiptsStatus}
+              loadError={receiptsError}
+            />
           </section>
         </div>
       </main>

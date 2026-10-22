@@ -21,14 +21,22 @@ export interface AuditLogItem {
   policyId?: string;
   /** Buyer approval link while a PayPal order is above the owner's approval threshold. */
   approveUrl?: string;
+  /** 'paypal' (gateway) or 'evm' (leash-mcp release on the local chain) for persisted receipts. */
+  rail?: 'paypal' | 'evm';
+  /** On-chain release transaction (rail 'evm'). */
+  txHash?: string;
   durationMs: number;
 }
 
 interface AuditLogTableProps {
   logs: AuditLogItem[];
-  onRefresh?: () => void;
+  onRefresh?: () => Promise<void>;
   onCapture?: (policyId: string, nonce: string) => Promise<void>;
   isLoading?: boolean;
+  /** Result of the last receipts load: how many came back and when. */
+  loadedReceipts?: { count: number; at: string } | null;
+  /** Why the last receipts load failed, if it did. */
+  loadError?: string | null;
 }
 
 function ApprovalActions({ log, onCapture }: { log: AuditLogItem; onCapture?: AuditLogTableProps['onCapture'] }) {
@@ -109,6 +117,7 @@ function StatusPill({ log }: { log: AuditLogItem }) {
 
 function releaseText(log: AuditLogItem): string {
   if (log.paypalOrderId) return log.paypalOrderId;
+  if (log.txHash) return `Anvil tx ${truncateHash(log.txHash, 6, 4)}`;
   if (log.status === 'FAILED') {
     return /setup required|not configured/i.test(log.rejectionReason || '') ? 'PayPal: setup required' : 'PayPal: not completed';
   }
@@ -120,32 +129,64 @@ export function AuditLogTable({
   onRefresh,
   onCapture,
   isLoading = false,
+  loadedReceipts,
+  loadError,
 }: AuditLogTableProps) {
+  const [refreshing, setRefreshing] = React.useState(false);
+  const refresh = async () => {
+    if (!onRefresh) return;
+    setRefreshing(true);
+    try {
+      await onRefresh();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+  const spinning = refreshing || isLoading;
   return (
     <div className="cx-panel overflow-hidden">
       <div className="p-5 sm:p-7 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
           <h2 className="text-[26px] sm:text-[32px] leading-[1.05] font-medium tracking-tightest">
-            Walk log · this gateway
+            Walk log · this console
           </h2>
           <p className="mt-2 text-[14px] text-white/65 max-w-[62ch]">
-            Receipts from the gateway: policy id, salted merchant hash, nonce, proof hash and PayPal ids. The
-            private rules never appear here.
+            Receipts from the gateway (PayPal rail) and this device&rsquo;s on-chain releases (leash-mcp on Anvil):
+            policy id, salted merchant hash, nonce, proof hash, PayPal ids or tx hash. This session&rsquo;s refusals
+            are listed too. The private rules never appear here.
           </p>
+          {onRefresh && (
+            <p role="status" className="mt-2 mono text-[12.5px] text-white/55">
+              {refreshing
+                ? 'Loading receipts…'
+                : loadedReceipts
+                ? `${loadedReceipts.count} ${loadedReceipts.count === 1 ? 'receipt' : 'receipts'} · updated ${loadedReceipts.at}`
+                : loadError
+                ? 'Receipts not loaded'
+                : 'Loading receipts…'}
+            </p>
+          )}
         </div>
 
         {onRefresh && (
           <button
             type="button"
-            onClick={onRefresh}
-            disabled={isLoading}
+            onClick={refresh}
+            disabled={refreshing}
+            aria-busy={refreshing}
             className="btn btn-ghost-light btn-sm shrink-0 self-start sm:self-auto"
           >
-            <RefreshCw className={isLoading ? 'motion-safe:animate-spin' : ''} aria-hidden="true" />
+            <RefreshCw className={spinning ? 'motion-safe:animate-spin' : ''} aria-hidden="true" />
             <span>Refresh</span>
           </button>
         )}
       </div>
+
+      {loadError && (
+        <div role="alert" className="mx-5 sm:mx-7 mb-4 rounded-2xl bg-no-soft px-4 py-3 text-[13.5px] text-no break-words">
+          {loadError}
+        </div>
+      )}
 
       {logs.length === 0 ? (
         <div className="mx-5 sm:mx-7 mb-6 rounded-2xl border border-dashed border-white/15 px-5 py-10 text-center">
@@ -184,7 +225,7 @@ export function AuditLogTable({
                   </div>
                   <div className="flex justify-between gap-3">
                     <dt className="text-white/50">Release</dt>
-                    <dd className="mono text-right break-all">{releaseText(log)}</dd>
+                    <dd className="mono text-right break-all" title={log.txHash}>{releaseText(log)}</dd>
                   </div>
                 </dl>
                 {log.rejectionReason && (
@@ -231,7 +272,7 @@ export function AuditLogTable({
                     <td className="py-3.5 px-4 mono text-[12px] text-white/60" title={log.merchantIdHash}>
                       {truncateHash(log.merchantIdHash, 6, 4) || '—'}
                     </td>
-                    <td className="py-3.5 px-4 mono text-[12px] text-white/70" title={log.rejectionReason || log.paypalStatus}>
+                    <td className="py-3.5 px-4 mono text-[12px] text-white/70" title={log.txHash || log.rejectionReason || log.paypalStatus}>
                       {releaseText(log)}
                     </td>
                     <td className="py-3.5 pl-4 pr-7 mono text-[12px] text-white/60 text-right">

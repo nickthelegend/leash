@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { GatewayError } from '@leash/core';
+import { GatewayError, Receipt, ReceiptStore, leashHome, sharedGateway } from '@leash/core';
 
 /**
  * Proving needs the policy secrets, so it only runs on the owner's device: `next dev` on the owner's
@@ -35,4 +35,16 @@ export function errorResponse(err: unknown): NextResponse {
     return NextResponse.json({ success: false, error: e.message, ...e.extra }, { status: e.status });
   }
   return NextResponse.json({ success: false, error: String((err as Error)?.message ?? err) }, { status: 500 });
+}
+
+/**
+ * Receipts the console shows: the gateway's (PayPal rail) plus, on the owner device, the on-chain
+ * releases leash-mcp recorded on this machine (<LEASH_HOME>/receipts.jsonl, rail "evm"). Both stores
+ * hold public data only (policy id, amount, salted merchant hash, nonce, proof hash, ids / tx hash).
+ * Newest first.
+ */
+export function consoleReceipts(): Receipt[] {
+  const all = [...sharedGateway().receipts.list()];
+  if (ownerDeviceEnabled()) all.push(...new ReceiptStore(leashHome()).list());
+  return all.sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0));
 }
