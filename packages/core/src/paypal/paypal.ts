@@ -47,6 +47,24 @@ export class PayPalApiError extends Error {
   }
 }
 
+/**
+ * PayPal accepted the capture for exactly the proven amount but holds it as PENDING (for example
+ * PENDING_REVIEW): not paid yet, and not a failure either, since it can still settle. The gateway
+ * records it as CAPTURE_PENDING and never retries it.
+ */
+export class PayPalCapturePending extends PayPalApiError {
+  readonly orderId: string;
+  readonly captureId: string;
+  readonly reason?: string;
+  constructor(c: { orderId: string; captureId: string; reason?: string }, body?: unknown) {
+    super(`Capture ${c.captureId} is PENDING at PayPal (${c.reason ?? 'no reason given'}); not paid yet`, undefined, body);
+    this.name = 'PayPalCapturePending';
+    this.orderId = c.orderId;
+    this.captureId = c.captureId;
+    this.reason = c.reason;
+  }
+}
+
 /** A payment the ZK proof already approved; the order must match it exactly. */
 export interface ProvenPayment {
   /** keccak256(abi.encode(owner, commitment)), 0x + 64 hex */
@@ -212,34 +230,44 @@ export function extractApproveLink(resp: { links?: Link[] }): string | undefined
 /**
  * Accept a capture only if the order is COMPLETED and purchase_units[0].payments.captures[0] is
  * COMPLETED for exactly the proven amount (PayPal: a COMPLETED order can still hold a DECLINED
- * capture, so check the capture itself). Throws otherwise.
+ * capture, so check the capture itself). A PENDING capture for exactly the proven amount throws
+ * PayPalCapturePending; anything else throws PayPalApiError.
  */
 export function assertCaptureMatches(
   resp: any,
   expected: { amountCents: number; currency?: string; customId?: string }
 ): VerifiedCapture {
   const orderId = resp?.id;
+  const unit = resp?.purchase_units?.[0];
+  const cap = unit?.payments?.captures?.[0];
+  const currency = expected.currency ?? 'USD';
+  /** Amount, currency and custom_id of the capture must be the proven ones (also for a PENDING capture). */
+  const checkCapture = () => {
+    if (cap.amount?.currency_code !== currency) {
+      throw new PayPalApiError(`Capture currency ${cap.amount?.currency_code} != ${currency}`, undefined, resp);
+    }
+    const cents = valueToCents(String(cap.amount?.value));
+    if (cents !== expected.amountCents) {
+      throw new PayPalApiError(`Captured ${cents} cents != proven ${expected.amountCents} cents`, undefined, resp);
+    }
+    const cid: string | undefined = cap.custom_id ?? unit?.custom_id;
+    if (expected.customId && cid && cid !== expected.customId) {
+      throw new PayPalApiError(`custom_id ${cid} != expected ${expected.customId}`, undefined, resp);
+    }
+    return { cents, cid };
+  };
+  if (cap?.status === 'PENDING') {
+    checkCapture();
+    throw new PayPalCapturePending({ orderId, captureId: cap.id, reason: cap.status_details?.reason }, resp);
+  }
   if (resp?.status !== 'COMPLETED') {
     throw new PayPalApiError(`Order ${orderId ?? '?'} status is ${resp?.status ?? 'missing'}, not COMPLETED`, undefined, resp);
   }
-  const unit = resp?.purchase_units?.[0];
-  const cap = unit?.payments?.captures?.[0];
   if (!cap) throw new PayPalApiError(`Order ${orderId} has no capture`, undefined, resp);
   if (cap.status !== 'COMPLETED') {
     throw new PayPalApiError(`Capture ${cap.id} status is ${cap.status}, not COMPLETED`, undefined, resp);
   }
-  const currency = expected.currency ?? 'USD';
-  if (cap.amount?.currency_code !== currency) {
-    throw new PayPalApiError(`Capture currency ${cap.amount?.currency_code} != ${currency}`, undefined, resp);
-  }
-  const captured = valueToCents(String(cap.amount?.value));
-  if (captured !== expected.amountCents) {
-    throw new PayPalApiError(`Captured ${captured} cents != proven ${expected.amountCents} cents`, undefined, resp);
-  }
-  const customId: string | undefined = cap.custom_id ?? unit?.custom_id;
-  if (expected.customId && customId && customId !== expected.customId) {
-    throw new PayPalApiError(`custom_id ${customId} != expected ${expected.customId}`, undefined, resp);
-  }
+  const { cents: captured, cid: customId } = checkCapture();
   return { orderId, captureId: cap.id, status: 'COMPLETED', amountCents: captured, currency, customId };
 }
 

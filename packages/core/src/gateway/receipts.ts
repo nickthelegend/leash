@@ -23,8 +23,14 @@ export interface Receipt {
   /** 'default' (bb verify off-chain) or 'evm' (keccak transcript, LeashPayment) */
   proofTarget: 'default' | 'evm';
   rail: 'paypal' | 'evm';
-  /** FORWARDED: the leash-mcp proxy forwarded a proven call upstream that reported no order status. */
-  status: 'AWAITING_APPROVAL' | 'COMPLETED' | 'FAILED' | 'FORWARDED';
+  /**
+   * PENDING: the gateway consumed the nonce and is calling PayPal right now (until leaseUntil).
+   * CAPTURE_PENDING: PayPal accepted the capture for the proven amount but holds it (not paid yet).
+   * FORWARDED: the leash-mcp proxy forwarded a proven call upstream that reported no order status.
+   */
+  status: 'PENDING' | 'AWAITING_APPROVAL' | 'COMPLETED' | 'CAPTURE_PENDING' | 'FAILED' | 'FORWARDED';
+  /** PENDING only: after this time a crashed attempt counts as stale and the same proof may retry. */
+  leaseUntil?: string;
   paypalOrderId?: string;
   captureId?: string;
   /** keccak256(abi.encode(policyId, nonce)), sent to PayPal as purchase_units[0].custom_id */

@@ -8,7 +8,7 @@ import { paypalPayee, policyIdOf } from '../src/crypto/evm.js';
 import { GatewayError, PayGateway } from '../src/gateway/payGateway.js';
 import { proofKeccak, Receipt } from '../src/gateway/receipts.js';
 import { createGatewayApp } from '../src/gateway/server.js';
-import { PayPalService } from '../src/paypal/paypal.js';
+import { CreatedOrder, PayPalCapturePending, PayPalService } from '../src/paypal/paypal.js';
 import { createSpendingPolicy } from '../src/policy/policy.js';
 import { generatePaymentProof } from '../src/prover/prover.js';
 import { currentEpoch } from '../src/spend/spendState.js';
@@ -223,5 +223,96 @@ describe('PayPal failures before consumption cost the agent nothing; a FAILED at
     const replay = await payError(g.pay({ owner: OWNER, ...other, paypalMerchantId: MERCHANT, ...urls }));
     expect(replay.status).toBe(409);
     expect(replay.message).toBe('Nonce already used for this policy');
+  });
+});
+
+// A payment in flight must not be retried or downgraded. PayPal itself is not reachable here, so the
+// PayPal client below only schedules outcomes in time (resolve after 200 ms, reject after 300 ms) to
+// drive the gateway's concurrency; no test or doc treats its orders as real PayPal orders.
+class ScheduledPayPal extends PayPalService {
+  calls = 0;
+  constructor(private readonly outcomes: ((n: number) => Promise<CreatedOrder>)[]) {
+    super({ clientId: 'scheduled', clientSecret: 'scheduled' });
+  }
+  override async getAccessToken(): Promise<string> {
+    return 'scheduled';
+  }
+  override async createOrder(): Promise<CreatedOrder> {
+    const n = this.calls++;
+    return this.outcomes[Math.min(n, this.outcomes.length - 1)](n);
+  }
+}
+const after = <T>(ms: number, fn: () => T) => new Promise<T>((resolve, reject) => setTimeout(() => { try { resolve(fn()); } catch (e) { reject(e); } }, ms));
+
+describe('in-flight payments: PENDING lease, no downgrade, PayPal capture PENDING', () => {
+  const fresh = (paypal: PayPalService, reg: { approvalThresholdCents?: number; vaultId?: string } = {}) => {
+    const g = new PayGateway({ dir: fs.mkdtempSync(path.join(dir, 'flight-')), paypal });
+    g.register({ owner: OWNER, policyCommitment: policy.policyCommitment, approvalThresholdCents: 0, ...reg }, { trustedOwnerDevice: true });
+    return g;
+  };
+
+  it('a concurrent resubmission of the same proof is refused while the first is in flight, and cannot overwrite its order', async () => {
+    const pp = new ScheduledPayPal([
+      () => after(200, () => ({ orderId: 'FIRSTORDER0001', status: 'PAYER_ACTION_REQUIRED', approveUrl: 'https://www.sandbox.paypal.com/checkoutnow?token=FIRSTORDER0001', requestId: 'r1', raw: {} })),
+      () => after(300, () => { throw new Error('PayPal POST /v2/checkout/orders failed (500) INTERNAL_SERVER_ERROR'); }),
+    ]);
+    const g = fresh(pp);
+    const p = prove('7201');
+    const first = g.pay({ owner: OWNER, ...p, paypalMerchantId: MERCHANT, ...urls });
+    const second = after(50, () => g.pay({ owner: OWNER, ...p, paypalMerchantId: MERCHANT, ...urls })).then((x) => x);
+    const [a, b] = await Promise.allSettled([first, second]);
+    expect(a.status).toBe('fulfilled');
+    expect(b.status).toBe('rejected');
+    expect((b as PromiseRejectedResult).reason).toMatchObject({ status: 409, message: 'Payment for this nonce is in flight' });
+    expect(pp.calls).toBe(1);
+    await new Promise((r) => setTimeout(r, 400)); // anything the second attempt could still write lands by now
+    expect(g.receipts.get(policyId, '7201')).toMatchObject({ status: 'AWAITING_APPROVAL', paypalOrderId: 'FIRSTORDER0001' });
+  });
+
+  it('a PENDING receipt whose lease ran out (the process died mid-call) is retried; a live lease is not', async () => {
+    const g = fresh(noKeys);
+    const p = prove('7202');
+    const pending: Receipt = {
+      policyId,
+      nonce: '7202',
+      amountCents: 300,
+      merchantIdHash: p.publicInputs.merchant_id_hash,
+      recipient: p.publicInputs.recipient,
+      epoch: Number(p.publicInputs.epoch),
+      newSpendCommit: p.publicInputs.new_spend_commit,
+      proofKeccak: proofKeccak(p.proofHex),
+      vkHash: 'test',
+      proofTarget: 'default',
+      rail: 'paypal',
+      status: 'PENDING',
+      leaseUntil: new Date(Date.now() + 60_000).toISOString(),
+      ts: new Date().toISOString(),
+    };
+    g.receipts.put(pending);
+    fs.writeFileSync(path.join(g.dir, 'spend.json'), JSON.stringify({ [policyId]: { epoch: pending.epoch, commit: pending.newSpendCommit } }));
+    const live = await payError(g.pay({ owner: OWNER, ...p, paypalMerchantId: MERCHANT, ...urls }));
+    expect(live.status).toBe(409);
+    expect(live.message).toBe('Payment for this nonce is in flight');
+    g.receipts.put({ ...pending, leaseUntil: new Date(Date.now() - 1).toISOString() });
+    const stale = await payError(g.pay({ owner: OWNER, ...p, paypalMerchantId: MERCHANT, ...urls }));
+    expect(stale.status).toBe(503); // reached the PayPal step as a retry (here: Setup required)
+    expect(stale.message).toContain('Setup required (PAYPAL_CLIENT_ID)');
+  });
+
+  it('a vault charge whose capture PayPal reports PENDING is recorded CAPTURE_PENDING (not FAILED) and is not retried', async () => {
+    const pp = new ScheduledPayPal([
+      () =>
+        after(10, () => {
+          throw new PayPalCapturePending({ orderId: 'VAULTORDER0001', captureId: 'CAPTURE0000001', reason: 'PENDING_REVIEW' });
+        }),
+    ]);
+    const g = fresh(pp, { approvalThresholdCents: 500, vaultId: 'vault_test_1' });
+    const p = prove('7203');
+    const r = await g.pay({ owner: OWNER, ...p, paypalMerchantId: MERCHANT, ...urls });
+    expect(r).toMatchObject({ status: 'CAPTURE_PENDING', paypalOrderId: 'VAULTORDER0001', captureId: 'CAPTURE0000001' });
+    expect(r.error).toBe('Capture CAPTURE0000001 is PENDING at PayPal (PENDING_REVIEW); not paid yet');
+    const again = await payError(g.pay({ owner: OWNER, ...p, paypalMerchantId: MERCHANT, ...urls }));
+    expect(again.status).toBe(409);
+    expect(pp.calls).toBe(1);
   });
 });

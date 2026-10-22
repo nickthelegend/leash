@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { keccakWords, paypalPayee, policyIdOf } from '../src/crypto/evm.js';
 import {
   assertCaptureMatches,
+  PayPalCapturePending,
   buildCaptureHeaders,
   buildCreateOrderBody,
   buildCreateOrderHeaders,
@@ -137,6 +138,21 @@ describe('capture assertion (pure, on response-shaped objects)', () => {
     expect(() => assertCaptureMatches(resp('COMPLETED', 'COMPLETED', '3.01'), { amountCents: 300 })).toThrow(/301 cents != proven 300/);
     expect(() => assertCaptureMatches(resp('COMPLETED', 'COMPLETED', '3.00', 'EUR'), { amountCents: 300 })).toThrow(/currency/);
     expect(() => assertCaptureMatches(resp('COMPLETED', 'COMPLETED', '3.00'), { amountCents: 300, customId: '0xbeef' })).toThrow(/custom_id/);
+  });
+
+  it('a PENDING capture for exactly the proven amount is its own outcome (PayPalCapturePending), not a failure', () => {
+    const pending = { ...resp('COMPLETED', 'PENDING', '3.00'), purchase_units: [{ payments: { captures: [{ id: '3C679366HH908993F', status: 'PENDING', status_details: { reason: 'PENDING_REVIEW' }, custom_id: cid, amount: { currency_code: 'USD', value: '3.00' } }] } }] };
+    let err: unknown;
+    try {
+      assertCaptureMatches(pending, { amountCents: 300, customId: cid });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(PayPalCapturePending);
+    expect(err).toMatchObject({ orderId: '5O190127TN364715T', captureId: '3C679366HH908993F', reason: 'PENDING_REVIEW' });
+    expect((err as Error).message).toBe('Capture 3C679366HH908993F is PENDING at PayPal (PENDING_REVIEW); not paid yet');
+    // A PENDING capture for the wrong amount is still a mismatch, not "pending"
+    expect(() => assertCaptureMatches(resp('COMPLETED', 'PENDING', '3.01'), { amountCents: 300 })).toThrow(/301 cents != proven 300/);
   });
 });
 

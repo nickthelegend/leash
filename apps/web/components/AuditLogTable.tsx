@@ -12,8 +12,11 @@ export interface AuditLogItem {
   merchantIdHash: string;
   nonce: string;
   proofVerified: boolean;
-  /** FORWARDED: leash-mcp's proxy forwarded a proven call upstream that reported no order status. */
-  status: 'COMPLETED' | 'REJECTED' | 'FAILED' | 'AWAITING_APPROVAL' | 'FORWARDED';
+  /**
+   * FORWARDED: leash-mcp's proxy forwarded a proven call upstream that reported no order status.
+   * PENDING: the gateway is calling PayPal right now. CAPTURE_PENDING: PayPal holds the capture (not paid yet).
+   */
+  status: 'COMPLETED' | 'REJECTED' | 'FAILED' | 'AWAITING_APPROVAL' | 'FORWARDED' | 'PENDING' | 'CAPTURE_PENDING';
   rejectionReason?: string;
   paypalOrderId?: string;
   paypalStatus?: string;
@@ -82,6 +85,26 @@ function StatusPill({ log }: { log: AuditLogItem }) {
     return (
       <span className="inline-flex items-center gap-1.5 h-7 px-3 rounded-full text-[12px] font-medium bg-sun-soft text-sun whitespace-nowrap">
         <Hourglass className="w-3.5 h-3.5" aria-hidden="true" /> Awaiting approval
+      </span>
+    );
+  }
+  if (log.status === 'PENDING') {
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 h-7 px-3 rounded-full text-[12px] font-medium bg-sun-soft text-sun whitespace-nowrap"
+        title="Proof verified and nonce consumed; the gateway is waiting for PayPal"
+      >
+        <RefreshCw className="w-3.5 h-3.5" aria-hidden="true" /> In flight
+      </span>
+    );
+  }
+  if (log.status === 'CAPTURE_PENDING') {
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 h-7 px-3 rounded-full text-[12px] font-medium bg-sun-soft text-sun whitespace-nowrap"
+        title={log.rejectionReason ?? 'PayPal holds the capture as PENDING; not paid yet'}
+      >
+        <Hourglass className="w-3.5 h-3.5" aria-hidden="true" /> Capture pending
       </span>
     );
   }

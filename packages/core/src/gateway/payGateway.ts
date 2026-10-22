@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { recoverEip191Signer } from '../crypto/eip191.js';
 import { isAddress, paypalPayee, PAYPAL_MERCHANT_ID_RE, policyIdOf } from '../crypto/evm.js';
-import { leashCustomId, PayPalService, PayPalSetupRequired, paypalService } from '../paypal/paypal.js';
+import { leashCustomId, PayPalCapturePending, PayPalService, PayPalSetupRequired, paypalService } from '../paypal/paypal.js';
 import { currentEpoch } from '../spend/spendState.js';
 import { leashHome } from '../util/paths.js';
 import { decodePublicInputs, DecodedPublicInputs, resolveCircuitsDir, verifyPaymentProof } from '../verifier/verifier.js';
@@ -193,9 +193,13 @@ export class PayGateway {
    * OAuth token (so wrong credentials or an unreachable PayPal cost the agent nothing) all come before
    * anything is consumed. The nonce and spend checks then run again, synchronously, right before the
    * nonce and spend commitment are consumed (no await in between), so two concurrent requests can't
-   * both pass. Only the order create/capture call can fail after consumption; that leaves a FAILED
+   * both pass. Consuming writes a PENDING receipt with a lease: while it is live, a resubmission of
+   * the same proof is refused with 409 "in flight" (in this process or another one sharing the
+   * directory). Only the order create/capture call can fail after consumption; that leaves a FAILED
    * receipt, and resubmitting the same proof retries it (same PayPal-Request-Id, so PayPal does not
-   * create a second order) instead of being refused as a used nonce.
+   * create a second order) instead of being refused as a used nonce; so does a PENDING whose lease
+   * ran out (the process died mid-call). A settled receipt (AWAITING_APPROVAL, COMPLETED,
+   * CAPTURE_PENDING) is never downgraded. A vault capture PayPal holds as PENDING is CAPTURE_PENDING.
    */
   async pay(input: {
     owner: string;
@@ -223,6 +227,8 @@ export class PayGateway {
     // earlier attempt, so only the PayPal step runs again.
     const retry = this.isRetry(policyId, pi.nonce, pk);
     const checkNonceAndSpend = () => {
+      const current = this.receipts.get(policyId, pi.nonce);
+      if (current && this.inFlight(current)) throw new GatewayError(409, 'Payment for this nonce is in flight', { nonce: pi.nonce, status: current.status });
       if (retry) {
         if (!this.isRetry(policyId, pi.nonce, pk)) throw new GatewayError(409, 'Nonce already used for this policy', { nonce: pi.nonce });
         if (Number(pi.epoch) !== currentEpoch(nowMs)) throw new GatewayError(400, `Wrong epoch: proof is for day ${pi.epoch}, today is ${currentEpoch(nowMs)}`);
@@ -283,40 +289,79 @@ export class PayGateway {
       custom_id: leashCustomId(policyId, pi.nonce),
       ts: new Date().toISOString(),
     };
-    // Consume: nonce (receipt exists) + spend commitment, synchronously. A retry consumed them already.
+    // Consume: nonce (PENDING receipt with a lease) + spend commitment, synchronously. A retry consumed them already.
     this.receipts.saveProof({ proofHex: input.proofHex, publicInputsHex: input.publicInputsHex, proofTarget: 'default' });
-    this.receipts.put({ ...base, error: retry ? 'PayPal order pending (retry)' : 'PayPal order pending' });
+    this.receipts.put({
+      ...base,
+      status: 'PENDING',
+      leaseUntil: new Date(Date.now() + this.leaseMs()).toISOString(),
+      error: retry ? 'PayPal order pending (retry)' : 'PayPal order pending',
+    });
     if (!retry) this.advanceSpend(policyId, pi);
 
     const proven = { policyId, nonce: pi.nonce, amountCents, payeeMerchantId: input.paypalMerchantId };
     try {
       if (humanApproval) {
         const order = await this.paypal.createOrder(proven, { kind: 'human', returnUrl: input.returnUrl, cancelUrl: input.cancelUrl });
-        return this.receipts.put({ ...base, status: 'AWAITING_APPROVAL', paypalOrderId: order.orderId, approveUrl: order.approveUrl, ts: new Date().toISOString() });
+        return this.settle({ ...base, status: 'AWAITING_APPROVAL', paypalOrderId: order.orderId, approveUrl: order.approveUrl, ts: new Date().toISOString() });
       }
       const order = await this.paypal.createOrder(proven, { kind: 'vault', vaultId: reg.vaultId! });
-      return this.receipts.put({ ...base, status: 'COMPLETED', paypalOrderId: order.orderId, captureId: order.capture!.captureId, ts: new Date().toISOString() });
+      return this.settle({ ...base, status: 'COMPLETED', paypalOrderId: order.orderId, captureId: order.capture!.captureId, ts: new Date().toISOString() });
     } catch (e: any) {
-      return this.receipts.put({ ...base, status: 'FAILED', error: e.message, ts: new Date().toISOString() });
+      if (e instanceof PayPalCapturePending) {
+        return this.settle({ ...base, status: 'CAPTURE_PENDING', paypalOrderId: e.orderId, captureId: e.captureId, error: e.message, ts: new Date().toISOString() });
+      }
+      return this.settle({ ...base, status: 'FAILED', error: e.message, ts: new Date().toISOString() });
     }
   }
 
-  /** True when (policyId, nonce) has a FAILED receipt made from this same proof (keccak of the bytes). */
+  /** How long a PENDING receipt blocks resubmissions: comfortably longer than the PayPal calls can take. */
+  private leaseMs(): number {
+    return Math.max(60_000, 4 * this.paypal.timeoutMs);
+  }
+
+  /** A PENDING receipt whose lease has not run out: another attempt is talking to PayPal right now. */
+  private inFlight(r: Receipt): boolean {
+    return r.status === 'PENDING' && Date.parse(r.leaseUntil ?? '') > Date.now();
+  }
+
+  /**
+   * Compare-and-set for the outcome of a PayPal call: a receipt that is already settled
+   * (AWAITING_APPROVAL, COMPLETED, CAPTURE_PENDING) for this nonce is never downgraded to FAILED and
+   * never replaced by another attempt's order; the stored one is returned instead.
+   */
+  private settle(next: Receipt): Receipt {
+    const current = this.receipts.get(next.policyId, next.nonce);
+    const settled = current && (current.status === 'COMPLETED' || current.status === 'CAPTURE_PENDING' || current.status === 'AWAITING_APPROVAL');
+    if (settled && !(current!.status === 'AWAITING_APPROVAL' && next.status === 'COMPLETED' && next.paypalOrderId === current!.paypalOrderId)) {
+      return current!;
+    }
+    return this.receipts.put({ ...next, leaseUntil: undefined });
+  }
+
+  /**
+   * True when (policyId, nonce) has a receipt made from this same proof (keccak of the bytes) that may
+   * be retried: FAILED, or PENDING whose lease ran out.
+   */
   private isRetry(policyId: string, nonce: string, proofKeccakHex: string): boolean {
     const r = this.receipts.get(policyId, nonce);
-    return r?.status === 'FAILED' && r.proofKeccak === proofKeccakHex;
+    if (!r || r.proofKeccak !== proofKeccakHex) return false;
+    return r.status === 'FAILED' || (r.status === 'PENDING' && !this.inFlight(r));
   }
 
   /** Capture an approved order. COMPLETED only if PayPal reports COMPLETED for exactly the proven cents. */
   async capture(policyId: string, nonce: string): Promise<Receipt> {
     const r = this.receipts.get(policyId, nonce);
     if (!r) throw new GatewayError(404, 'No receipt for that policy and nonce');
-    if (r.status === 'COMPLETED') return r;
+    if (r.status === 'COMPLETED' || r.status === 'CAPTURE_PENDING') return r;
     if (r.status !== 'AWAITING_APPROVAL' || !r.paypalOrderId) throw new GatewayError(409, `Receipt is ${r.status}; nothing to capture`);
     try {
       const cap = await this.paypal.captureOrder(r.paypalOrderId, { policyId, nonce, amountCents: r.amountCents });
       return this.receipts.put({ ...r, status: 'COMPLETED', captureId: cap.captureId, error: undefined, ts: new Date().toISOString() });
     } catch (e: any) {
+      if (e instanceof PayPalCapturePending) {
+        return this.receipts.put({ ...r, status: 'CAPTURE_PENDING', captureId: e.captureId, error: e.message, ts: new Date().toISOString() });
+      }
       if (e instanceof PayPalSetupRequired) throw new GatewayError(503, e.message);
       // Leave it awaiting approval (the buyer may not have approved yet); report why.
       throw new GatewayError(502, `Capture failed: ${e.message}`);
