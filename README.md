@@ -63,6 +63,10 @@ to create in the PayPal Developer Dashboard, and makes no PayPal call.
   binaries first), the PayPal client (`paypal/paypal.ts`), the **verify-only** `PayGateway` with JSONL
   receipts, the spend-chain tracker and the policy-violation matrix.
 - **`apps/web`**: Next.js console and the PayPal release route. `POST /api/pay` is the only pay route.
+  With `PAYPAL_PAYEE_MERCHANT_ID` set, every policy the console commits lists `paypal-sandbox-merchant`
+  and the console's Pay, Tug and walk test pay it, sending its PayPal merchant id to `/api/pay` so the
+  gateway's payee check passes (without it, Pay proves for the tag's first merchant and the PayPal
+  rail answers `Setup required`).
   Proving routes (`/api/prove`, `POST /api/policies`, `/api/harness`, `POST /api/paypal/vault`) need the
   policy secrets and run only on the owner device (`next dev`, or `LEASH_OWNER_DEVICE=1`); a production
   build is verify-only. On the owner device they answer only that machine: the console binds

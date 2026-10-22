@@ -14,6 +14,7 @@ RUN="$ROOT/e2e/.run"
 export ANVIL_PORT="${LEASH_E2E_ANVIL_PORT:-8557}"
 WEB_PORT="${LEASH_E2E_WEB_PORT:-3107}"
 GATEWAY_PORT="${LEASH_E2E_GATEWAY_PORT:-3108}"
+PAYPAL_WEB_PORT="${LEASH_E2E_PAYPAL_WEB_PORT:-3109}"
 
 stop() {
   if [ -f "$RUN/pids" ]; then
@@ -56,8 +57,19 @@ fi
     exec ./node_modules/.bin/next start -H 127.0.0.1 -p "$WEB_PORT"
 ) > "$RUN/web.log" 2>&1 &
 echo "web $!" >> "$RUN/pids"
+# Second console with a PayPal sandbox merchant id (valid format, no client id/secret: no PayPal call is
+# possible), for e2e/console-paypal.spec.ts. Own state dir.
+mkdir -p "$RUN/leash-home-paypal"
+(
+  cd apps/web
+  LEASH_HOME="$RUN/leash-home-paypal" LEASH_OWNER_DEVICE=1 PAYPAL_PAYEE_MERCHANT_ID=ABCDEFGHJKLMN PORT="$PAYPAL_WEB_PORT" \
+    exec ./node_modules/.bin/next start -H 127.0.0.1 -p "$PAYPAL_WEB_PORT"
+) > "$RUN/web-paypal.log" 2>&1 &
+echo "web-paypal $!" >> "$RUN/pids"
 for _ in $(seq 60); do curl -sf "http://127.0.0.1:$WEB_PORT/api/policies" >/dev/null && break; sleep 0.5; done
 curl -sf "http://127.0.0.1:$WEB_PORT/api/policies" >/dev/null || { echo "console did not start (see $RUN/web.log)" >&2; exit 1; }
 curl -sf "http://127.0.0.1:$GATEWAY_PORT/api/health" >/dev/null || { echo "gateway did not start (see $RUN/gateway.log)" >&2; exit 1; }
-echo "console http://127.0.0.1:$WEB_PORT  gateway http://127.0.0.1:$GATEWAY_PORT  anvil http://127.0.0.1:$ANVIL_PORT"
+for _ in $(seq 60); do curl -sf "http://127.0.0.1:$PAYPAL_WEB_PORT/api/policies" >/dev/null && break; sleep 0.5; done
+curl -sf "http://127.0.0.1:$PAYPAL_WEB_PORT/api/policies" >/dev/null || { echo "PayPal-merchant console did not start (see $RUN/web-paypal.log)" >&2; exit 1; }
+echo "console http://127.0.0.1:$WEB_PORT  console+PayPal merchant http://127.0.0.1:$PAYPAL_WEB_PORT  gateway http://127.0.0.1:$GATEWAY_PORT  anvil http://127.0.0.1:$ANVIL_PORT"
 cat "$RUN/pids"

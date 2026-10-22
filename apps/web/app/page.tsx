@@ -45,6 +45,9 @@ const INITIAL_AGENTS: AgentConfig[] = [
   },
 ];
 
+/** Allowlist name the server gives the PayPal sandbox merchant (apps/web/app/api/policies/route.ts). */
+const PAYPAL_MERCHANT = 'paypal-sandbox-merchant';
+
 export default function Home() {
   const [agents, setAgents] = useState<AgentConfig[]>(INITIAL_AGENTS);
   const [zkStatus, setZkStatus] = useState<ZKStatus>('idle');
@@ -58,6 +61,9 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [nonceCounter, setNonceCounter] = useState(1001);
   const [owner, setOwner] = useState<string | null>(null);
+  // Set when the server has PAYPAL_PAYEE_MERCHANT_ID: every committed policy then lists this merchant
+  // with its PayPal merchant id, and the console's payments go to it (the PayPal rail).
+  const [paypalMerchant, setPaypalMerchant] = useState<string | null>(null);
   const [captureError, setCaptureError] = useState<string | null>(null);
 
   // Walk log load state: what the last receipts fetch returned, or why it failed (never swallowed).
@@ -101,7 +107,10 @@ export default function Home() {
     fetchLogs();
     fetch('/api/policies')
       .then((r) => r.json())
-      .then((d) => setOwner(d.owner ?? null))
+      .then((d) => {
+        setOwner(d.owner ?? null);
+        setPaypalMerchant(d.paypalPayeeMerchantId ? PAYPAL_MERCHANT : null);
+      })
       .catch(() => setOwner(null));
   }, [fetchLogs]);
 
@@ -338,12 +347,13 @@ export default function Home() {
   };
 
   // Demo helpers for DemoRunner
+  const walkMerchant = paypalMerchant ?? 'openai';
   const runLegitDemo = async () => {
-    await executePayment(agents[0].id, 'openai', 300);
+    await executePayment(agents[0].id, walkMerchant, 300);
   };
 
   const runAttackDemo = async () => {
-    await executePayment(agents[0].id, 'openai', 50000);
+    await executePayment(agents[0].id, walkMerchant, 50000);
   };
 
   // Derived from the gateway receipts only; nothing here is invented.
@@ -459,6 +469,7 @@ export default function Home() {
                   onTriggerPayment={executePayment}
                   isLoading={isLoading}
                   activeAgentId={activeAgentId}
+                  paypalMerchant={paypalMerchant}
                 />
               ))}
             </div>
@@ -466,7 +477,7 @@ export default function Home() {
 
           {/* Walk test + lead state */}
           <section id="run" aria-label="Walk test and proof status" className="mt-14 grid gap-4 lg:grid-cols-2 scroll-mt-6">
-            <DemoRunner onRunLegitDemo={runLegitDemo} onRunAttackDemo={runAttackDemo} isRunning={isLoading} />
+            <DemoRunner onRunLegitDemo={runLegitDemo} onRunAttackDemo={runAttackDemo} isRunning={isLoading} merchant={walkMerchant} />
             <ZKProofIndicator
               status={zkStatus}
               proofData={zkProofData}

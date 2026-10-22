@@ -13,10 +13,10 @@ type Guard = { allow: (pathPart: string, status: number) => void; problems: stri
 
 export const test = base.extend<{ guard: Guard }>({
   guard: [
-    async ({ page }, use) => {
+    async ({ page, baseURL }, use) => {
       const allowed: Array<{ pathPart: string; status: number }> = [];
       const problems: string[] = [];
-      const origin = new URL(BASE).origin;
+      const origin = new URL(baseURL ?? BASE).origin;
       page.on('console', (m) => {
         if (m.type() !== 'error') return;
         if (/^Failed to load resource: the server responded with a status of \d+/.test(m.text())) return;

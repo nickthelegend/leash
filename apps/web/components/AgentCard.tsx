@@ -23,6 +23,12 @@ interface AgentCardProps {
   onTriggerPayment: (agentId: string, merchant: string, amountCents: number) => void;
   isLoading?: boolean;
   activeAgentId?: string | null;
+  /**
+   * The PayPal sandbox merchant ('paypal-sandbox-merchant') when PAYPAL_PAYEE_MERCHANT_ID is set: the
+   * server adds it to every committed policy, and Pay / Tug pay it so the gateway can release through
+   * PayPal. Otherwise Pay uses the agent's first allowlisted merchant.
+   */
+  paypalMerchant?: string | null;
 }
 
 /** An agent's policy as a yellow tag: the commitment engraved, the spool (cap), today's cord, the allowlist. */
@@ -34,6 +40,7 @@ export function AgentCard({
   onTriggerPayment,
   isLoading = false,
   activeAgentId,
+  paypalMerchant,
 }: AgentCardProps) {
   const [copied, setCopied] = React.useState(false);
   const isActive = activeAgentId === agent.id;
@@ -49,7 +56,8 @@ export function AgentCard({
   };
 
   const legitAmount = Math.min(300, agent.capCents);
-  const merchant = agent.allowlistedMerchants[0] || 'openai';
+  const merchant = paypalMerchant || agent.allowlistedMerchants[0] || 'openai';
+  const allowlist = paypalMerchant ? [...agent.allowlistedMerchants, paypalMerchant] : agent.allowlistedMerchants;
   const cordPct = Math.min(100, (spentTodayCents / dailyCapCents) * 100);
   const hex = agent.commitmentHash.replace(/^0x/, '');
 
@@ -124,7 +132,7 @@ export function AgentCard({
       <div className="mt-4">
         <div className="text-[12.5px] mb-1.5">Allowlist · payee bound per merchant</div>
         <div className="flex flex-wrap gap-1.5">
-          {agent.allowlistedMerchants.map((m) => (
+          {allowlist.map((m) => (
             <span key={m} className="inline-flex items-center h-7 px-2.5 rounded-[7px] mono text-[12px] bg-cobalt-900 text-sun">
               {m}
             </span>
@@ -132,7 +140,11 @@ export function AgentCard({
         </div>
       </div>
 
-      <div className="mt-auto pt-5 grid grid-cols-2 gap-2">
+      <p className="mt-auto pt-5 text-[12.5px] text-[#3a4470] break-words">
+        Pay and Tug pay <span className="mono font-medium">{merchant}</span>
+        {paypalMerchant ? ' on the PayPal rail' : ''}
+      </p>
+      <div className="mt-2 grid grid-cols-2 gap-2">
         <button
           type="button"
           onClick={() => onTriggerPayment(agent.id, merchant, legitAmount)}

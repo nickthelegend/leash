@@ -28,15 +28,21 @@ export default defineConfig({
     { name: 'chain', testMatch: /anvil-mcp\.spec\.ts/ },
     {
       name: 'desktop',
-      testIgnore: /anvil-mcp\.spec\.ts/,
+      testIgnore: /(anvil-mcp|console-paypal)\.spec\.ts/,
       dependencies: ['chain'],
       use: { viewport: { width: 1280, height: 800 } },
     },
     {
       name: 'mobile',
-      testIgnore: /(anvil-mcp|owner-device)\.spec\.ts/,
+      testIgnore: /(anvil-mcp|console-paypal|owner-device)\.spec\.ts/,
       dependencies: ['chain'],
       use: { viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true },
+    },
+    // A second console with PAYPAL_PAYEE_MERCHANT_ID set (no client id): its payments go to the PayPal merchant.
+    {
+      name: 'paypal-merchant',
+      testMatch: /console-paypal\.spec\.ts/,
+      use: { baseURL: process.env.LEASH_E2E_PAYPAL_BASE_URL ?? 'http://127.0.0.1:3109', viewport: { width: 1280, height: 800 } },
     },
   ],
 });

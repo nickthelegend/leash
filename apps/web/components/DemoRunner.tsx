@@ -7,12 +7,15 @@ interface DemoRunnerProps {
   onRunLegitDemo: () => Promise<void>;
   onRunAttackDemo: () => Promise<void>;
   isRunning?: boolean;
+  /** Merchant both steps pay: the PayPal sandbox merchant when one is configured, else openai. */
+  merchant?: string;
 }
 
 export function DemoRunner({
   onRunLegitDemo,
   onRunAttackDemo,
   isRunning = false,
+  merchant = 'openai',
 }: DemoRunnerProps) {
   const [step, setStep] = useState<'idle' | 'legit' | 'attack' | 'complete'>('idle');
   const [elapsedMs, setElapsedMs] = useState<number>(0);
@@ -46,14 +49,14 @@ export function DemoRunner({
       key: 'legit' as const,
       icon: ShieldCheck,
       title: 'Payment inside the lead',
-      amount: '300 cents ($3.00) to openai',
+      amount: `300 cents ($3.00) to ${merchant}`,
       body: 'Within the cap and on the allowlist. A real Noir proof is generated, then verified by bb before the release step runs.',
     },
     {
       key: 'attack' as const,
       icon: ShieldAlert,
       title: 'Injected tug',
-      amount: '50,000 cents ($500.00) to openai',
+      amount: `50,000 cents ($500.00) to ${merchant}`,
       body: 'An injected prompt tries to drain $500. Rule R2 asserts amount <= max_per_tx, so witness generation fails and no proof exists.',
     },
   ];
