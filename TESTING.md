@@ -1,6 +1,6 @@
 # Testing
 
-Counts from `pnpm run pretest && pnpm test` on 2026-10-21 (nargo
+Counts from `pnpm run pretest && pnpm test` on 2026-10-22 (nargo
 1.0.0-beta.16, bb 3.0.1, forge 1.7.1, Node 26). Every proof in these tests is a real UltraHonk proof
 made by nargo + bb; nothing that touches a circuit, a verifier or a chain is mocked.
 
@@ -8,10 +8,23 @@ made by nargo + bb; nothing that touches a circuit, a verifier or a chain is moc
 |---|---|---|---|
 | Noir circuit | `cd circuits && nargo test` | 16 | 0 |
 | Solidity (`LeashPayment` + bb `HonkVerifier`, real proof fixtures) | `cd contracts && forge test` | 48 | 0 |
-| `@leash/core` (vitest) | `pnpm --filter @leash/core test` | 70 | 1 |
+| `@leash/core` (vitest) | `pnpm --filter @leash/core test` | 72 | 1 |
 | `@leash/mcp` (tsc + vitest) | `pnpm --filter @leash/mcp test` | 10 | 0 |
-| **Total** | `pnpm test` | **144** | **1** |
+| **Total** | `pnpm test` | **146** | **1** |
 | Web console (lint + type check + build) | `pnpm --filter web lint && pnpm --filter web build` | passes | |
+| Browser E2E (Playwright in Google Chrome, real stack) | `e2e/stack.sh start && pnpm test:e2e` | 53 (chain 9, desktop 22, mobile 22) | 0 |
+
+**Browser E2E.** `e2e/stack.sh start` starts Anvil with LeashPayment and the escrow-funded demo policy
+(`pnpm demo:anvil`), the verify-only gateway and the console (`next start`, owner device on), all on
+127.0.0.1 with their own `LEASH_HOME`; `e2e/stack.sh stop` kills them by PID. The `chain` project
+drives leash-mcp over MCP stdio (no LLM): 300 cents to the bound payee from escrow via a relayer, the
+over-cap, attacker-payee, daily-cap and replay refusals, the redirected proof (SumcheckFailed),
+`verify:receipt`, and owner-signed (EIP-191) gateway registration. The `desktop` (1280x800) and
+`mobile` (375x812) projects click through the landing and the console in Chrome with video and
+traces: every nav anchor and every "log" control, the lead animation and reduced motion, Pay / Tug /
+spools / walk test / pull test with real proofs, the walk log and its Refresh, and the PayPal rail's
+"Setup required". Each page fails on console errors, failed same-origin requests or horizontal
+scroll. A run needs a fresh stack (the chain project uses fixed nonces).
 
 The skipped test is the live PayPal sandbox order. It runs only when `PAYPAL_CLIENT_ID` and
 `PAYPAL_CLIENT_SECRET` are set and otherwise prints `Setup required (PAYPAL_CLIENT_ID): live sandbox
