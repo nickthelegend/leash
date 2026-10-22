@@ -32,7 +32,9 @@ export interface Receipt {
   approveUrl?: string;
   /**
    * leash-mcp proxy only: true once PayPal reported purchase_units[0].payee.merchant_id equal to the
-   * allowlisted merchant (in the create_order or a get_order response). pay_order is refused until then.
+   * allowlisted merchant and purchase_units[0].amount equal to the proven cents in USD (in the
+   * create_order or a get_order response). pay_order re-reads the order with get_order before every
+   * capture regardless.
    */
   payeeVerified?: boolean;
   txHash?: string;

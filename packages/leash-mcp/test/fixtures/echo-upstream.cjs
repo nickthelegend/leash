@@ -3,6 +3,9 @@
 // no payment data: every tool echoes the exact arguments it received and appends them to $ECHO_LOG,
 // so a test can see what (if anything) the proxy forwarded. Tool names and the create_order input
 // shape follow @paypal/agent-toolkit so the proxy's gating and amount computation are exercised.
+// A test can make it answer a tool with a fixed order-shaped body instead of the echo by writing
+// { "<tool>": {...} } to the JSON file named by $ECHO_REPLIES (read on every call); the call is
+// still logged, so the test sees exactly what the proxy forwarded.
 const fs = require('fs');
 const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
 const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
@@ -31,6 +34,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
   const entry = { tool: req.params.name, received: req.params.arguments ?? {}, n: ++n };
   if (process.env.ECHO_LOG) fs.appendFileSync(process.env.ECHO_LOG, JSON.stringify(entry) + '\n');
-  return { content: [{ type: 'text', text: JSON.stringify(entry) }] };
+  const replies = process.env.ECHO_REPLIES && fs.existsSync(process.env.ECHO_REPLIES) ? JSON.parse(fs.readFileSync(process.env.ECHO_REPLIES, 'utf8')) : {};
+  const body = replies[req.params.name] ?? entry;
+  return { content: [{ type: 'text', text: JSON.stringify(body) }] };
 });
 server.connect(new StdioServerTransport());

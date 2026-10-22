@@ -161,6 +161,13 @@ describe('leash-mcp --upstream (proof-gated proxy)', () => {
 describe('pay_order is refused unless the order awaits approval and its payee is verified', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'leash-capture-'));
   const log = path.join(dir, 'echo.jsonl');
+  const replies = path.join(dir, 'replies.json');
+  const reply = (r: Record<string, unknown>) => fs.writeFileSync(replies, JSON.stringify(r));
+  const order = (id: string, value: string, currency = 'USD') => ({
+    id,
+    status: 'PAYER_ACTION_REQUIRED',
+    purchase_units: [{ payee: { merchant_id: 'ABCDEFGHJKLMN' }, amount: { currency_code: currency, value } }],
+  });
   const calls = () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
   const policy = createSpendingPolicy({
     name: 'capture rules',
@@ -192,6 +199,7 @@ describe('pay_order is refused unless the order awaits approval and its payee is
 
   beforeAll(async () => {
     process.env.ECHO_LOG = log;
+    process.env.ECHO_REPLIES = replies;
     proxy = new ProofGatedProxy({
       upstream: [process.execPath, path.join(__dirname, 'fixtures/echo-upstream.cjs')],
       policy,
@@ -204,6 +212,7 @@ describe('pay_order is refused unless the order awaits approval and its payee is
   afterAll(async () => {
     await proxy.close();
     delete process.env.ECHO_LOG;
+    delete process.env.ECHO_REPLIES;
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -231,4 +240,41 @@ describe('pay_order is refused unless the order awaits approval and its payee is
     expect(c.filter((x) => x.tool === 'get_order').map((x) => x.received)).toEqual([{ id: 'ORDER-NOPAYEE' }]); // read-only check
     expect(c.filter((x) => x.tool === 'pay_order')).toEqual([]);
   });
+
+  it('an order created for the right payee but the wrong amount ($30.00 for a 300-cent proof) is FAILED at create, and pay_order is never forwarded', async () => {
+    reply({ create_order: order('ORDER-AMOUNT', '30.00') });
+    const created = await proxy.call('create_order', { currencyCode: 'USD', items: item(3), nonce: '611', merchant: 'paypal-shop' });
+    expect(textOf(created)).toMatch(/"amountMismatch":true/);
+    const r = store.byOrderId('ORDER-AMOUNT')!;
+    expect(r.status).toBe('FAILED');
+    expect(r.payeeVerified).toBe(false);
+    expect(r.error).toMatch(/upstream order amount 30\.00 USD is not the proven 300 cents/);
+    const paid = await proxy.call('pay_order', { id: 'ORDER-AMOUNT' });
+    expect(paid.isError).toBe(true);
+    expect(textOf(paid)).toMatch(/^LEASH refused: order ORDER-AMOUNT is FAILED/);
+    expect(calls().filter((c) => c.tool === 'pay_order')).toEqual([]);
+  }, 60_000);
+
+  it('an order whose amount matched at create but reads back changed ($30.00) from get_order is refused before pay_order is forwarded', async () => {
+    reply({ create_order: order('ORDER-REREAD', '3.00') });
+    await proxy.call('create_order', { currencyCode: 'USD', items: item(3), nonce: '612', merchant: 'paypal-shop' });
+    const r = store.byOrderId('ORDER-REREAD')!;
+    expect(r.status).toBe('AWAITING_APPROVAL');
+    expect(r.payeeVerified).toBe(true);
+    reply({ get_order: order('ORDER-REREAD', '30.00') });
+    const paid = await proxy.call('pay_order', { id: 'ORDER-REREAD' });
+    expect(paid.isError).toBe(true);
+    expect(textOf(paid)).toMatch(/^LEASH refused: order ORDER-REREAD: amount 30\.00 USD is not the proven 300 cents; not capturing/);
+    expect(calls().filter((c) => c.tool === 'get_order').at(-1)!.received).toEqual({ id: 'ORDER-REREAD' });
+    expect(calls().filter((c) => c.tool === 'pay_order')).toEqual([]);
+  }, 60_000);
+
+  it('an order whose get_order reports no amount is refused before pay_order is forwarded', async () => {
+    reply({ create_order: order('ORDER-NOAMT', '3.00') });
+    await proxy.call('create_order', { currencyCode: 'USD', items: item(3), nonce: '613', merchant: 'paypal-shop' });
+    reply({ get_order: { id: 'ORDER-NOAMT', status: 'APPROVED', purchase_units: [{ payee: { merchant_id: 'ABCDEFGHJKLMN' } }] } });
+    const paid = await proxy.call('pay_order', { id: 'ORDER-NOAMT' });
+    expect(textOf(paid)).toMatch(/^LEASH refused: order ORDER-NOAMT: PayPal did not report purchase_units\[0\]\.amount/);
+    expect(calls().filter((c) => c.tool === 'pay_order')).toEqual([]);
+  }, 60_000);
 });

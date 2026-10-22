@@ -54,5 +54,5 @@ increasing version.
 `leash-mcp` gives an MCP agent `leash_request_payment` (prove + verify, or the rule that was broken),
 `leash_execute_onchain`, `leash_pay_paypal` and `leash_receipt`. In `--upstream` mode it sits in front of
 PayPal's own agent-toolkit MCP server as a default-deny, proof-gated proxy: `create_order` needs a proof
-for the order total, `pay_order` only captures a proven order awaiting approval whose payee PayPal
-confirmed, read-only tools pass, and every other upstream tool is hidden and refused.
+for the order total, `pay_order` only captures a proven order awaiting approval, after a `get_order`
+read-back confirms the allowlisted payee and the proven amount (checked before capture), read-only tools pass, and every other upstream tool is hidden and refused.

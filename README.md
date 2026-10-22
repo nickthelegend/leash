@@ -151,9 +151,12 @@ It re-exports the upstream tool names. `create_order` additionally requires `non
 the proxy computes the order total from `items`, proves it locally, verifies it, sends
 `keccak256(public inputs)` upstream (as `custom_id` if the tool has one, otherwise appended to
 `notes`: `@paypal/mcp`'s `create_order` has no `custom_id` field), forwards, and records a receipt.
-`pay_order` is only allowed for orders created that way that are awaiting approval and whose payee
-PayPal reported as the allowlisted merchant (checked with `get_order` first when the create response
-named none), and the capture must match the proven cents. A proof for an EVM-payee merchant can't
+If the create response names a payee or an amount that isn't the allowlisted merchant and the
+proven cents in USD, the receipt is marked FAILED right away. `pay_order` is only allowed for orders
+created that way that are awaiting approval, and before every capture the proxy reads the order
+back with `get_order`: the payee must be the allowlisted merchant and the amount exactly the proven
+cents in USD, **checked before `pay_order` is forwarded** (a missing payee or amount is refused too).
+The capture that comes back must then be COMPLETED for the proven cents. A proof for an EVM-payee merchant can't
 create a PayPal order. Everything else is **default-deny**: only read-only tools (`get_*`, `list_*`, `show_*`, e.g.
 `get_order`) pass through without a proof. Every other upstream tool, which under `--tools=all`
 includes `create_refund`, `create_subscription`, `send_invoice` and `accept_dispute_claim`, is

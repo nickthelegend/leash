@@ -10,8 +10,10 @@
  *                 many cents to that merchant fits the policy, verifies the proof, injects
  *                 custom_id = keccak256(public inputs) into the forwarded call, forwards, and records a
  *                 receipt. No valid proof, no upstream call.
- *   pay_order     only for an order this proxy created from a verified proof; the capture must come
- *                 back COMPLETED for exactly the proven cents.
+ *   pay_order     only for an order this proxy created from a verified proof. Before every capture the
+ *                 order is read back with get_order: its payee must be the allowlisted PayPal merchant
+ *                 and its amount exactly the proven cents in USD, or nothing is forwarded. The capture
+ *                 must then come back COMPLETED for exactly the proven cents.
  * Default-deny for everything else: only read-only tools (get_*, list_*, show_*) pass through unchanged.
  * Every other upstream tool (under `--tools=all` that includes create_refund, create_subscription,
  * send_invoice, accept_dispute_claim, …) is hidden from tools/list and refused with "LEASH refused:
@@ -92,6 +94,19 @@ export function orderTotalCents(args: Record<string, any>): number | string {
   const cents = Math.round(total * 100);
   if (!Number.isFinite(cents) || cents <= 0) return 'order total must be positive';
   return cents;
+}
+
+/** purchase_units[0].amount as cents, or an error string when it is missing, not USD or unparseable. */
+export function unitAmountCents(unit: any): number | string {
+  const value = unit?.amount?.value;
+  if (value === undefined || value === null) return 'missing';
+  const currency = unit?.amount?.currency_code;
+  if (currency !== 'USD') return `${value} ${currency ?? '(no currency)'}`;
+  try {
+    return valueToCents(String(value));
+  } catch {
+    return `${value} ${currency}`;
+  }
 }
 
 function parseJson(r: ToolResult): any {
@@ -232,43 +247,56 @@ export class ProofGatedProxy {
 
     const result = (await this.client.callTool({ name: tool.name, arguments: forwarded })) as ToolResult;
     const order = parseJson(result);
-    const payee = order?.purchase_units?.[0]?.payee?.merchant_id;
+    const unit = order?.purchase_units?.[0];
+    const payee = unit?.payee?.merchant_id;
     const status: Receipt['status'] = result.isError
       ? 'FAILED'
       : order?.status === 'PAYER_ACTION_REQUIRED' || order?.status === 'CREATED'
         ? 'AWAITING_APPROVAL'
         : 'FORWARDED';
     const payeeMismatch = Boolean(payee && payee !== leaf.paypalMerchantId);
+    // An amount the response reports must be the proven cents in USD; an absent one is checked with
+    // get_order before capture (as every order is).
+    const reported = unitAmountCents(unit);
+    const amountMismatch = reported !== 'missing' && reported !== amountCents;
+    const error = payeeMismatch
+      ? `upstream order payee ${payee} is not the allowlisted ${leaf.paypalMerchantId}`
+      : amountMismatch
+        ? `upstream order amount ${typeof reported === 'number' ? `${unit.amount.value} USD` : reported} is not the proven ${amountCents} cents`
+        : result.isError
+          ? 'upstream error'
+          : undefined;
     this.receipts.put({
       ...base,
-      status: payeeMismatch ? 'FAILED' : status,
-      // Absent payee (e.g. a return=minimal response): unverified; pay_order checks it with get_order first.
-      payeeVerified: Boolean(payee) && !payeeMismatch,
+      status: payeeMismatch || amountMismatch ? 'FAILED' : status,
+      // Verified only when PayPal named the allowlisted payee AND the proven amount.
+      payeeVerified: Boolean(payee) && !payeeMismatch && typeof reported === 'number' && !amountMismatch,
       paypalOrderId: typeof order?.id === 'string' ? order.id : undefined,
       approveUrl: order?.links?.find?.((l: any) => l.rel === 'payer-action' || l.rel === 'approve')?.href,
-      error: payeeMismatch ? `upstream order payee ${payee} is not the allowlisted ${leaf.paypalMerchantId}` : result.isError ? 'upstream error' : undefined,
+      error,
       ts: new Date().toISOString(),
     });
     return {
       ...result,
       content: [
         ...result.content,
-        { type: 'text', text: JSON.stringify({ leash: { proven: true, amountCents, nonce, custom_id: customId, boundVia, payeeMismatch } }) },
+        { type: 'text', text: JSON.stringify({ leash: { proven: true, amountCents, nonce, custom_id: customId, boundVia, payeeMismatch, amountMismatch } }) },
       ],
     };
   }
 
   /**
-   * Before capturing an order whose create response did not name the payee: read it back with the
-   * upstream's read-only get_order and require purchase_units[0].payee.merchant_id to be the
-   * allowlisted PayPal merchant (and the amount, when reported, to be the proven cents).
-   * Returns a refusal, or undefined when the payee is verified (the receipt is updated).
+   * Right before every capture: read the order back with the upstream's read-only get_order and
+   * require purchase_units[0].payee.merchant_id to be the allowlisted PayPal merchant and
+   * purchase_units[0].amount to be exactly the proven cents in USD. The order can change between
+   * create and capture, so a match at create time is not enough. Returns a refusal (nothing is
+   * forwarded), or undefined when the order is verified (the receipt is updated).
    */
-  private async verifyPayee(id: string, r: Receipt): Promise<ToolResult | undefined> {
+  private async verifyOrder(id: string, r: Receipt): Promise<ToolResult | undefined> {
     const leaf = this.opts.policy.merchantLeaves.find((m) => m.hash === r.merchantIdHash);
     if (!leaf?.paypalMerchantId) return refuse(`order ${id}: its proof is not for a PayPal merchant in this policy`);
     if (!this.tools.some((t) => t.name === 'get_order')) {
-      return refuse(`order ${id}: payee unverified (the create response named none) and the upstream has no get_order to check it`);
+      return refuse(`order ${id}: the upstream has no get_order to check the payee and amount before capture`);
     }
     const got = (await this.client.callTool({ name: 'get_order', arguments: { id } })) as ToolResult;
     const order = got.isError ? undefined : parseJson(got);
@@ -279,22 +307,19 @@ export class ProofGatedProxy {
     }
     if (payee !== leaf.paypalMerchantId) {
       const error = `order payee ${payee} is not the allowlisted ${leaf.paypalMerchantId}`;
-      this.receipts.put({ ...r, status: 'FAILED', error, ts: new Date().toISOString() });
+      this.receipts.put({ ...r, status: 'FAILED', payeeVerified: false, error, ts: new Date().toISOString() });
       return refuse(`order ${id}: ${error}; not capturing`);
     }
-    const value = unit?.amount?.value;
-    if (value !== undefined) {
-      let cents: number | undefined;
-      try {
-        cents = valueToCents(String(value));
-      } catch {
-        cents = undefined;
-      }
-      if (cents !== r.amountCents || (unit?.amount?.currency_code ?? 'USD') !== 'USD') {
-        return refuse(`order ${id}: amount ${value} ${unit?.amount?.currency_code ?? '(no currency)'} is not the proven ${r.amountCents} cents; not capturing`);
-      }
+    const cents = unitAmountCents(unit);
+    if (cents === 'missing') {
+      return refuse(`order ${id}: PayPal did not report purchase_units[0].amount, so the amount is unverified; not capturing`);
     }
-    this.receipts.put({ ...r, payeeVerified: true, ts: new Date().toISOString() });
+    if (cents !== r.amountCents) {
+      const error = `amount ${typeof cents === 'number' ? `${unit.amount.value} USD` : cents} is not the proven ${r.amountCents} cents`;
+      this.receipts.put({ ...r, status: 'FAILED', payeeVerified: false, error, ts: new Date().toISOString() });
+      return refuse(`order ${id}: ${error}; not capturing`);
+    }
+    if (!r.payeeVerified) this.receipts.put({ ...r, payeeVerified: true, ts: new Date().toISOString() });
     return undefined;
   }
 
@@ -308,11 +333,9 @@ export class ProofGatedProxy {
     if (r.status !== 'AWAITING_APPROVAL') {
       return refuse(`order ${id} is ${r.status}${r.error ? ` (${r.error})` : ''}; only an order awaiting approval can be captured`);
     }
-    if (!r.payeeVerified) {
-      const unverified = await this.verifyPayee(id, r);
-      if (unverified) return unverified;
-      r = this.receipts.byOrderId(id)!;
-    }
+    const unverified = await this.verifyOrder(id, r);
+    if (unverified) return unverified;
+    r = this.receipts.byOrderId(id)!;
     const result = (await this.client.callTool({ name: 'pay_order', arguments: { id } })) as ToolResult;
     if (result.isError) return result;
     try {

@@ -35,7 +35,9 @@ can be talked around; a spending limit held by the agent can be lied about.
   approves it; below it a vaulted wallet is charged. Paid only when the capture is COMPLETED for the
   proven cents.
 - `leash-mcp` gives any MCP agent these tools, and can sit in front of PayPal's own agent toolkit MCP
-  server as a proof-gated proxy.
+  server as a proof-gated proxy. There, before forwarding `pay_order`, it re-reads the order with
+  `get_order` and refuses unless the payee is the allowlisted merchant and the amount is exactly the
+  proven cents in USD.
 
 ## How PayPal is used
 Orders v2 create/capture with `payee.merchant_id`, `custom_id`, `invoice_id` and deterministic
