@@ -42,6 +42,7 @@ import {
   verifyPaymentProof,
   vkHash,
 } from '@leash/core';
+import { crossRailRefusal, railKey, RailTotals } from './ledger.js';
 
 type ToolResult = { content: { type: 'text'; text: string }[]; isError?: boolean };
 type UpstreamTool = { name: string; description?: string; inputSchema: { type: 'object'; properties?: Record<string, any>; required?: string[] } };
@@ -203,7 +204,19 @@ export class ProofGatedProxy {
       return refuse(`merchant '${listed.name}' is paid on the EVM rail (payee ${listed.payee}), not a PayPal merchant; its proof can't authorize a PayPal order`);
     }
     const epoch = currentEpoch();
-    const spendInputs = this.spend.inputs(policyId, epoch);
+    // The proxy's orders are their own spend chain (rail "paypal-mcp"); the policy's daily cap covers it
+    // together with what this device released on chain and through the gateway today.
+    const proxyKey = railKey(policyId, 'proxy');
+    const spendInputs = this.spend.inputs(proxyKey, epoch);
+    const today = (key: string) => {
+      const s = this.spend.get(key);
+      return s && s.epoch === epoch ? s.spentCents : 0;
+    };
+    const totals: RailTotals = { evm: today(railKey(policyId, 'evm')) };
+    if (today(railKey(policyId, 'paypal')) > 0) totals.paypal = today(railKey(policyId, 'paypal'));
+    totals.proxy = spendInputs.spentBeforeCents;
+    const overCap = crossRailRefusal({ rail: 'proxy', totals, amountCents, dailyCapCents: policy.dailyCapCents, outcome: 'Nothing was proved or forwarded.' });
+    if (overCap) return refuse(overCap);
     let proof;
     try {
       proof = generatePaymentProof({ policy, merchantName: merchant, amountCents, nonce, spend: spendInputs });
@@ -243,7 +256,7 @@ export class ProofGatedProxy {
     };
     this.receipts.saveProof({ proofHex: proof.proofHex, publicInputsHex: proof.publicInputsHex, proofTarget: 'default' });
     this.receipts.put({ ...base, error: `forwarding ${tool.name} (binding in ${boundVia})` });
-    this.spend.advance(policyId, { epoch, spentBeforeCents: spendInputs.spentBeforeCents, amountCents, newSpendCommit: proof.publicInputs.new_spend_commit });
+    this.spend.advance(proxyKey, { epoch, spentBeforeCents: spendInputs.spentBeforeCents, amountCents, newSpendCommit: proof.publicInputs.new_spend_commit });
 
     const result = (await this.client.callTool({ name: tool.name, arguments: forwarded })) as ToolResult;
     const order = parseJson(result);

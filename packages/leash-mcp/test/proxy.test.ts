@@ -154,6 +154,25 @@ describe('leash-mcp --upstream (proof-gated proxy)', () => {
     expect(textOf(r)).toMatch(/not created through a verified LEASH proof/);
     expect(forwarded().length).toBe(before);
   });
+
+  it('counts what this device released on chain today against the same daily cap (1300 on chain + 300 here + 300 > 1500)', async () => {
+    const policyId = new ReceiptStore(home).byNonce('503')[0].policyId;
+    // This device's record of today's on-chain releases (what leash-mcp writes after LeashPayment accepts one).
+    const evmRecord = path.join(home, 'spend', `${policyId.toLowerCase().replace(/[^0-9a-z]/g, '')}.json`);
+    fs.writeFileSync(evmRecord, JSON.stringify({ epoch: Math.floor(Date.now() / 86_400_000), spentCents: 1300, commit: `0x${'1'.repeat(64)}` }));
+    try {
+      const before = forwarded().length;
+      const r: any = await client.callTool({ name: 'create_order', arguments: { currencyCode: 'USD', items: item(3), nonce: '505', merchant: 'paypal-sandbox-merchant' } });
+      expect(r.isError).toBe(true);
+      expect(textOf(r)).toBe(
+        'LEASH refused: Daily cap reached across rails: 1600 cents already spent today (evm 1300, paypal-mcp 300) + 300 > daily cap 1500 cents. Nothing was proved or forwarded.'
+      );
+      expect(forwarded().length).toBe(before);
+      expect(new ReceiptStore(home).byNonce('505')).toEqual([]); // nonce not consumed
+    } finally {
+      fs.rmSync(evmRecord, { force: true });
+    }
+  });
 });
 
 // In-process proxy over the same echo upstream, with receipts placed in its store: pay_order must only

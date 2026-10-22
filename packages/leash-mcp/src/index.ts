@@ -23,6 +23,7 @@ import {
   Receipt,
   ReceiptStore,
   SpendInputs,
+  SpendingPolicy,
   SpendTracker,
   verifyPaymentProof,
   vkHash,
@@ -30,6 +31,7 @@ import {
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { crossRailRefusal, Rail, railKey, RailTotals } from './ledger.js';
 import { createProxyServer, ProofGatedProxy, splitCommand } from './proxy.js';
 
 /** `--demo`: prove against the fixed-salt demo policy (recordings/tests only). Default: the owner's random-salt policy. */
@@ -75,6 +77,8 @@ interface PendingSpend {
   spentBeforeCents: number;
   amountCents: number;
   newSpendCommit: string;
+  /** the rail whose spend chain this proof extends (absent in records written before rails were split) */
+  rail?: Rail;
 }
 const pendingFile = () => join(leashHome(), 'pending-spends.json');
 function readPending(): PendingSpend[] {
@@ -93,11 +97,13 @@ function rememberPending(p: PendingSpend): void {
   writeFileSync(tmp, JSON.stringify([...keep, p], null, 2), { mode: 0o600 });
   renameSync(tmp, f);
 }
-/** Advance the spend record from the pending proof whose new commitment is the one that landed. */
-function reconcile(key: string, epoch: number, landedCommit: string): SpendInputs | undefined {
-  const hit = readPending().find((x) => x.key === key.toLowerCase() && x.epoch === epoch && x.newSpendCommit.toLowerCase() === landedCommit.toLowerCase());
+/** Advance the rail's spend record from the pending proof whose new commitment is the one that landed. */
+function reconcile(key: string, epoch: number, landedCommit: string, rail: Rail): SpendInputs | undefined {
+  const hit = readPending().find(
+    (x) => x.key === key.toLowerCase() && x.epoch === epoch && (!x.rail || x.rail === rail) && x.newSpendCommit.toLowerCase() === landedCommit.toLowerCase()
+  );
   if (!hit) return undefined;
-  const next = spendTracker.advance(key, { epoch, spentBeforeCents: hit.spentBeforeCents, amountCents: hit.amountCents, newSpendCommit: hit.newSpendCommit });
+  const next = spendTracker.advance(railKey(key, rail), { epoch, spentBeforeCents: hit.spentBeforeCents, amountCents: hit.amountCents, newSpendCommit: hit.newSpendCommit });
   return { epoch, prevSpendCommit: landedCommit, spentBeforeCents: next.spentCents };
 }
 
@@ -122,11 +128,11 @@ async function gatewaySpendInputs(commitment: string): Promise<SpendInputs> {
   if (!res.ok) throw new Error(`Gateway ${base} answered ${res.status} for /api/spend`);
   const { spend } = (await res.json()) as { spend: { epoch: number; commit: string } | null };
   if (!spend || spend.epoch !== epoch || /^0x0+$/.test(spend.commit)) return { epoch, prevSpendCommit: '0', spentBeforeCents: 0 };
-  const local = spendTracker.get(id);
+  const local = spendTracker.get(railKey(id, 'paypal'));
   if (local && local.epoch === epoch && local.commit.toLowerCase() === spend.commit.toLowerCase()) {
     return { epoch, prevSpendCommit: spend.commit, spentBeforeCents: local.spentCents };
   }
-  const reconciled = reconcile(id, epoch, spend.commit);
+  const reconciled = reconcile(id, epoch, spend.commit, 'paypal');
   if (reconciled) return reconciled;
   throw new Error(`Gateway spend commitment ${spend.commit} is not one this device produced today; can't open it.`);
 }
@@ -145,13 +151,46 @@ function spendInputs(commitment: string): SpendInputs {
   if (local && local.epoch === epoch && local.commit.toLowerCase() === chainCommit) {
     return { epoch, prevSpendCommit: chainCommit, spentBeforeCents: local.spentCents };
   }
-  const reconciled = reconcile(id, epoch, chainCommit);
+  const reconciled = reconcile(id, epoch, chainCommit, 'evm');
   if (reconciled) return reconciled;
   throw new Error(
     `Spend commitment on chain (${chainCommit}) is not one this device produced today; can't open it to prove the daily cap. Another device spent under this policy.`
   );
 }
 
+/** PayPal-rail spend inputs: the gateway's chain when one is configured, else this device's record. */
+async function paypalRailInputs(commitment: string): Promise<SpendInputs> {
+  return gatewayUrl() ? gatewaySpendInputs(commitment) : spendTracker.inputs(railKey(spendKey(commitment), 'paypal'));
+}
+
+/**
+ * Cents landed today on every rail this policy can use. `own` is the rail being paid on, with the
+ * spend inputs its proof opens; the other rails are read from the chain / gateway (reconciled like a
+ * proof's own inputs, so a lost answer can't hide a landed payment) and from this device's records.
+ */
+async function railTotals(p: SpendingPolicy, own: { rail: Rail; spend: SpendInputs }): Promise<RailTotals> {
+  const t: RailTotals = {};
+  t.evm = own.rail === 'evm' ? own.spend.spentBeforeCents : spendInputs(p.policyCommitment).spentBeforeCents;
+  if (p.merchantLeaves.some((m) => m.paypalMerchantId)) {
+    t.paypal = own.rail === 'paypal' ? own.spend.spentBeforeCents : (await paypalRailInputs(p.policyCommitment)).spentBeforeCents;
+    // Orders the proof-gated proxy (leash-mcp --upstream) made from this device today.
+    const proxy = spendTracker.get(railKey(spendKey(p.policyCommitment), 'proxy'));
+    if (proxy && proxy.epoch === currentEpoch() && proxy.spentCents > 0) t.proxy = proxy.spentCents;
+  }
+  return t;
+}
+
+/** Refusal text when releasing a stored proof would take the policy over its daily cap across rails. */
+async function releaseRefusal(stored: StoredProof): Promise<string | undefined> {
+  const p = policy();
+  return crossRailRefusal({
+    rail: stored.rail,
+    totals: await railTotals(p, { rail: stored.rail, spend: stored.spend }),
+    amountCents: stored.amount,
+    dailyCapCents: p.dailyCapCents,
+    outcome: 'Nothing was sent.',
+  });
+}
 
 /**
  * Submit a stored proof to LeashPayment.executePayment with `cast send`.
@@ -159,7 +198,7 @@ function spendInputs(commitment: string): SpendInputs {
  * has unlocked (e.g. an Anvil dev account). No private key is handled here.
  * LEASH_POLICY_OWNER_ADDRESS (optional, defaults to the sender) selects whose policy pays.
  */
-function executeOnchain(nonce: string, recipientOverride?: string): ToolResult {
+async function executeOnchain(nonce: string, recipientOverride?: string): Promise<ToolResult> {
   const rpc = process.env.LEASH_RPC_URL;
   const contract = process.env.LEASH_PAYMENT_CONTRACT_ADDRESS;
   const sender = process.env.LEASH_SENDER_ADDRESS;
@@ -182,6 +221,9 @@ function executeOnchain(nonce: string, recipientOverride?: string): ToolResult {
   const stored = proofs.get(nonce);
   if (!stored) return fail(`No proof for nonce '${nonce}' in this session; call leash_request_payment first.`);
   if (stored.rail === 'paypal') return fail(`The proof for nonce '${nonce}' pays a PayPal merchant; use leash_pay_paypal.`);
+  // Another rail may have spent since this proof was made: the cap is per policy, not per rail.
+  const overCap = await releaseRefusal(stored);
+  if (overCap) return fail(overCap);
   const hex = stored.publicInputsHex.replace(/^0x/, '');
   if (hex.length !== 8 * 64) return fail(`Expected 8 public inputs, got ${hex.length / 64}`);
   const slot = (i: number) => '0x' + hex.slice(i * 64, (i + 1) * 64);
@@ -261,6 +303,8 @@ async function payPaypal(nonce: string): Promise<ToolResult> {
   if (stored.rail !== 'paypal' || !stored.paypalMerchantId) {
     return fail(`The proof for nonce '${nonce}' pays ${stored.recipient}, which is not a PayPal merchant in this policy; use leash_execute_onchain.`);
   }
+  const overCap = await releaseRefusal(stored);
+  if (overCap) return fail(overCap);
   const res = await fetch(`${base}/api/pay`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -274,7 +318,7 @@ async function payPaypal(nonce: string): Promise<ToolResult> {
     return fail(`Gateway ${base} answered ${res.status} with a body that is not JSON; check leash_receipt for nonce '${nonce}'.`);
   }
   if (body.consumed && body.receipt) {
-    spendTracker.advance(body.receipt.policyId, {
+    spendTracker.advance(railKey(body.receipt.policyId, 'paypal'), {
       epoch: stored.spend.epoch,
       spentBeforeCents: stored.spend.spentBeforeCents,
       amountCents: stored.amount,
@@ -427,7 +471,16 @@ export async function callTool(
         const leaf = p.merchantLeaves.find((m) => m.name === merchant.trim().toLowerCase());
         const rail: 'evm' | 'paypal' = leaf?.paypalMerchantId ? 'paypal' : 'evm';
         const useEvmTarget = rail === 'evm' && Boolean(process.env.LEASH_PAYMENT_CONTRACT_ADDRESS);
-        const spend = rail === 'paypal' && gatewayUrl() ? await gatewaySpendInputs(p.policyCommitment) : spendInputs(p.policyCommitment);
+        const spend = rail === 'paypal' ? await paypalRailInputs(p.policyCommitment) : spendInputs(p.policyCommitment);
+        // The circuit checks the cap on this rail's chain; the policy's cap covers all rails together.
+        const overCap = crossRailRefusal({
+          rail,
+          totals: await railTotals(p, { rail, spend }),
+          amountCents,
+          dailyCapCents: p.dailyCapCents,
+          outcome: 'Nothing was proved.',
+        });
+        if (overCap) return fail(overCap);
 
         const proof = generatePaymentProof({
           policy: p,
@@ -456,6 +509,7 @@ export async function callTool(
             spentBeforeCents: spend.spentBeforeCents,
             amountCents,
             newSpendCommit: proof.publicInputs.new_spend_commit,
+            rail,
           });
           proofs.set(nonce, {
             proofHex: proof.proofHex,
@@ -488,7 +542,7 @@ export async function callTool(
         if (r !== undefined && (typeof r !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(r))) {
           return fail('recipient must be a 0x-prefixed 20-byte address');
         }
-        return executeOnchain(args.nonce, r as string | undefined);
+        return await executeOnchain(args.nonce, r as string | undefined);
       }
       case 'leash_pay_paypal': {
         if (typeof args.nonce !== 'string' || !NONCE_RE.test(args.nonce)) return fail(NONCE_HELP);
