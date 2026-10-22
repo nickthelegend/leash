@@ -44,6 +44,9 @@ to create in the PayPal Developer Dashboard, and makes no PayPal call.
 
 ## Architecture
 
+Why it is built this way (proof per payment plus a spend commitment, a verify-only gateway, owner-keyed
+policies): [docs/DESIGN.md](docs/DESIGN.md).
+
 - **Noir circuit** (`circuits/src/main.nr`). Public inputs, in order: `policy_commitment`, `amount`
   (cents), `merchant_id_hash`, `nonce`, `recipient`, `epoch` (UTC day), `prev_spend_commit`, and the
   circuit's return value `new_spend_commit`. Private: `max_per_tx`, `daily_cap`, the allowlist
