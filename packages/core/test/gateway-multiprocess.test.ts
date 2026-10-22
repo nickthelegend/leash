@@ -48,3 +48,77 @@ describe('policies.json across processes', () => {
     expect(fs.existsSync(lock)).toBe(false);
   });
 });
+
+// Two gateway processes (the Express gateway and the console share LEASH_HOME/gateway) each get a valid
+// proof for the same policy, both built on the same spend commitment (prev 0, different nonces). Both
+// pass verification; then both reach the consume step at the same instant (a shared wall-clock barrier
+// in getAccessToken). Exactly one may consume; the other must get 409, or the spend chain forks and the
+// daily cap is counted twice. No PayPal is reachable: createOrder throws, which leaves the winner's
+// receipt FAILED after consumption (the state a PayPal outage leaves); nothing here is a PayPal order.
+describe('check-and-consume across processes', () => {
+  it('two proofs on the same spend commitment, consumed at once from two processes: exactly one wins each round, the other gets 409', async () => {
+    const { createSpendingPolicy } = await import('../src/policy/policy.js');
+    const { generatePaymentProof } = await import('../src/prover/prover.js');
+    const { currentEpoch } = await import('../src/spend/spendState.js');
+    const MERCHANT = 'ABCDEFGHJKLMN';
+    const policy = createSpendingPolicy({ name: 'race', maxPerTxCents: 500, dailyCapCents: 1000, merchants: [{ name: 'shop', paypalMerchantId: MERCHANT }], policySalt: '616161', spendSalt: '626262' });
+    const ROUNDS = 6;
+    const jobs: { dir: string; a: unknown; b: unknown }[] = [];
+    for (let i = 0; i < ROUNDS; i++) {
+      const d = fs.mkdtempSync(path.join(dir, 'race-'));
+      new PayGateway({ dir: d }).register({ owner: OWNER, policyCommitment: policy.policyCommitment, approvalThresholdCents: 0 }, { trustedOwnerDevice: true });
+      const prove = (nonce: string) => {
+        const p = generatePaymentProof({ policy, merchantName: 'shop', amountCents: 300, nonce, spend: { epoch: currentEpoch(), prevSpendCommit: '0', spentBeforeCents: 0 } });
+        return { proofHex: p.proofHex, publicInputsHex: p.publicInputsHex, newSpendCommit: p.publicInputs.new_spend_commit };
+      };
+      jobs.push({ dir: d, a: prove(`${8100 + i * 2}`), b: prove(`${8101 + i * 2}`) });
+    }
+    const jobsFile = path.join(dir, 'race-jobs.json');
+    fs.writeFileSync(jobsFile, JSON.stringify(jobs));
+    const t0 = Date.now() + 4000;
+    const PAYPAL_DIST = path.resolve(__dirname, '../dist/paypal/paypal.js');
+    const child = (side: 'a' | 'b') =>
+      new Promise<{ round: number; status: number; message?: string }[]>((resolve, reject) => {
+        const script = `
+          const { PayGateway, GatewayError } = require(process.env.GW_DIST);
+          const { PayPalService } = require(process.env.PP_DIST);
+          const jobs = JSON.parse(require('fs').readFileSync(process.env.JOBS, 'utf8'));
+          let at = 0;
+          class Barrier extends PayPalService {
+            constructor() { super({ clientId: 'race', clientSecret: 'race' }); }
+            async getAccessToken() { await new Promise((r) => setTimeout(r, Math.max(0, at - Date.now()))); return 'race'; }
+            async createOrder() { throw new Error('no PayPal in this test'); }
+          }
+          (async () => {
+            const out = [];
+            for (let i = 0; i < jobs.length; i++) {
+              at = ${t0} + i * 2500;
+              const gw = new PayGateway({ dir: jobs[i].dir, paypal: new Barrier() });
+              const p = jobs[i][process.env.SIDE];
+              try {
+                await gw.pay({ owner: '${OWNER}', proofHex: p.proofHex, publicInputsHex: p.publicInputsHex, paypalMerchantId: '${MERCHANT}', returnUrl: 'http://127.0.0.1/r', cancelUrl: 'http://127.0.0.1/c' });
+                out.push({ round: i, status: 200 });
+              } catch (e) {
+                out.push({ round: i, status: e instanceof GatewayError ? e.status : 500, message: e.message });
+              }
+            }
+            process.stdout.write(JSON.stringify(out));
+          })();`;
+        const c = spawn(process.execPath, ['-e', script], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, GW_DIST: DIST, PP_DIST: PAYPAL_DIST, JOBS: jobsFile, SIDE: side } });
+        let out = '';
+        let err = '';
+        c.stdout.on('data', (d) => (out += d));
+        c.stderr.on('data', (d) => (err += d));
+        c.on('exit', (code) => (code === 0 ? resolve(JSON.parse(out)) : reject(new Error(`child exited ${code}: ${err}`))));
+      });
+    const [ra, rb] = await Promise.all([child('a'), child('b')]);
+    for (let i = 0; i < ROUNDS; i++) {
+      const statuses = [ra[i].status, rb[i].status].sort();
+      expect(statuses, `round ${i}: ${JSON.stringify([ra[i], rb[i]])}`).toEqual([200, 409]);
+      const loser = ra[i].status === 409 ? ra[i] : rb[i];
+      expect(loser.message).toBe('Stale spend commitment: another payment landed first');
+      const winner = ra[i].status === 200 ? (jobs[i].a as any) : (jobs[i].b as any);
+      expect(new PayGateway({ dir: jobs[i].dir }).spendState(policyIdOf(OWNER, policy.policyCommitment))!.commit).toBe(winner.newSpendCommit);
+    }
+  }, 180_000);
+});

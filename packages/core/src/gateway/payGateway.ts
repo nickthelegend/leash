@@ -216,22 +216,19 @@ export class PayGateway {
     return this.readJson<Record<string, SpendRecord>>('spend.json', {})[policyId.toLowerCase()];
   }
 
-  /** Same rule as LeashPayment._checkSpend: today only; prev must be the stored commit, or 0 on a new day. */
-  private checkSpend(policyId: string, pi: DecodedPublicInputs, nowMs: number): void {
+  /**
+   * Same rule as LeashPayment._checkSpend: today only; prev must be the stored commit, or 0 on a new day.
+   * `stored` is the spend record as read inside the spend.json lock when the check guards a consume.
+   */
+  private checkSpend(policyId: string, pi: DecodedPublicInputs, nowMs: number, stored?: SpendRecord | null): void {
     const today = currentEpoch(nowMs);
     if (Number(pi.epoch) !== today) throw new GatewayError(400, `Wrong epoch: proof is for day ${pi.epoch}, today is ${today}`);
-    const s = this.spendState(policyId);
+    const s = stored === undefined ? this.spendState(policyId) : stored ?? undefined;
     if (s && s.epoch === today && s.commit !== ZERO) {
       if (pi.prev_spend_commit !== s.commit) throw new GatewayError(409, 'Stale spend commitment: another payment landed first');
     } else if (pi.prev_spend_commit !== ZERO) {
       throw new GatewayError(409, 'New epoch must start from zero');
     }
-  }
-
-  private advanceSpend(policyId: string, pi: DecodedPublicInputs): void {
-    this.updateJson<Record<string, SpendRecord>, void>('spend.json', (all) => {
-      all[policyId] = { epoch: Number(pi.epoch), commit: pi.new_spend_commit };
-    });
   }
 
   /**
@@ -240,11 +237,12 @@ export class PayGateway {
    *
    * Order matters: registration, nonce, spend chain, bb verify, PayPal configured, payee, and a PayPal
    * OAuth token (so wrong credentials or an unreachable PayPal cost the agent nothing) all come before
-   * anything is consumed. The nonce and spend checks then run again, synchronously, right before the
-   * nonce and spend commitment are consumed (no await in between), so two concurrent requests can't
-   * both pass. Consuming writes a PENDING receipt with a lease: while it is live, a resubmission of
-   * the same proof is refused with 409 "in flight" (in this process or another one sharing the
-   * directory). Only the order create/capture call can fail after consumption; that leaves a FAILED
+   * anything is consumed. The nonce and spend checks then run again inside the spend.json lock, on
+   * spend.json and the receipt log as re-read under that lock, and the nonce (a PENDING receipt) and
+   * the spend commitment are consumed under the same lock: of two requests built on the same spend
+   * commitment, in this process or another one sharing the directory, exactly one consumes and the
+   * other gets 409 "Stale spend commitment". While the PENDING receipt's lease is live, a resubmission
+   * of the same proof is refused with 409 "in flight". Only the order create/capture call can fail after consumption; that leaves a FAILED
    * receipt, and resubmitting the same proof retries it (same PayPal-Request-Id, so PayPal does not
    * create a second order) instead of being refused as a used nonce; so does a PENDING whose lease
    * ran out (the process died mid-call). A settled receipt (AWAITING_APPROVAL, COMPLETED,
@@ -277,7 +275,7 @@ export class PayGateway {
     // A FAILED receipt for this exact proof is a retry: its nonce and spend were consumed by the
     // earlier attempt, so only the PayPal step runs again.
     const retry = this.isRetry(policyId, pi.nonce, pk);
-    const checkNonceAndSpend = () => {
+    const checkNonceAndSpend = (stored?: SpendRecord | null) => {
       const current = this.receipts.get(policyId, pi.nonce);
       if (current && this.inFlight(current)) throw new GatewayError(409, 'Payment for this nonce is in flight', { nonce: pi.nonce, status: current.status });
       if (retry) {
@@ -287,7 +285,7 @@ export class PayGateway {
       }
       const used = this.receipts.get(policyId, pi.nonce);
       if (used) throw new GatewayError(409, 'Nonce already used for this policy', { nonce: pi.nonce, status: used.status });
-      this.checkSpend(policyId, pi, nowMs);
+      this.checkSpend(policyId, pi, nowMs, stored);
     };
     checkNonceAndSpend();
 
@@ -319,9 +317,6 @@ export class PayGateway {
       if (e instanceof PayPalSetupRequired) throw new GatewayError(503, `Proof verified; nothing consumed. ${e.message}`, { verified: true, setupRequired: e.missing });
       throw new GatewayError(502, `Proof verified; nothing consumed. ${(e as Error).message}`, { verified: true, consumed: false });
     }
-    // The await above let other requests run: check the nonce and spend chain again, synchronously.
-    checkNonceAndSpend();
-
     const amountCents = Number(pi.amount);
     const humanApproval = amountCents > reg.approvalThresholdCents || !reg.vaultId;
     const base: Receipt = {
@@ -340,15 +335,25 @@ export class PayGateway {
       custom_id: leashCustomId(policyId, pi.nonce),
       ts: new Date().toISOString(),
     };
-    // Consume: nonce (PENDING receipt with a lease) + spend commitment, synchronously. A retry consumed them already.
+    // The await above let other requests (and other processes) run. Check and consume under one lock:
+    // re-read spend.json and the receipt log, check the nonce and that the stored spend commitment is
+    // still the one this proof opens, then write the PENDING receipt (with a lease) and the new spend
+    // commitment. A retry consumed both already and only writes its PENDING receipt.
     this.receipts.saveProof({ proofHex: input.proofHex, publicInputsHex: input.publicInputsHex, proofTarget: 'default' });
-    this.receipts.put({
-      ...base,
-      status: 'PENDING',
-      leaseUntil: new Date(Date.now() + this.leaseMs()).toISOString(),
-      error: retry ? 'PayPal order pending (retry)' : 'PayPal order pending',
+    withFileLock(path.join(this.dir, 'spend.json'), () => {
+      const spend = this.readJson<Record<string, SpendRecord>>('spend.json', {});
+      checkNonceAndSpend(spend[policyId] ?? null);
+      this.receipts.put({
+        ...base,
+        status: 'PENDING',
+        leaseUntil: new Date(Date.now() + this.leaseMs()).toISOString(),
+        error: retry ? 'PayPal order pending (retry)' : 'PayPal order pending',
+      });
+      if (!retry) {
+        spend[policyId] = { epoch: Number(pi.epoch), commit: pi.new_spend_commit };
+        this.writeJson('spend.json', spend);
+      }
     });
-    if (!retry) this.advanceSpend(policyId, pi);
 
     const proven = { policyId, nonce: pi.nonce, amountCents, payeeMerchantId: input.paypalMerchantId };
     try {
