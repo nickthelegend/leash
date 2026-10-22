@@ -174,7 +174,7 @@ Requirements: Node 20+, pnpm, Foundry, jq, and the pinned Noir toolchain from
 pnpm install && pnpm setup:tools
 cp .env.example .env.local           # PayPal sandbox values (gitignored); read by paypal:e2e, the gateway, leash-mcp
 cp .env.local apps/web/.env.local    # the Next console reads its own folder's .env.local
-pnpm test                            # builds core + keys, then core, leash-mcp, nargo and forge tests
+pnpm test                            # runs pretest (build @leash/core, nargo compile, bb write_vk), then core, leash-mcp, nargo and forge tests
 pnpm dev:web                         # console + PayPal release route on :3000 (owner device)
 pnpm dev:gateway                     # optional standalone verify-only gateway
 ```

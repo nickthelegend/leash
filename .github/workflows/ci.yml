@@ -69,5 +69,4 @@ jobs:
       - name: Put the pinned nargo and bb on PATH
         run: echo "$PWD/.tools" >> "$GITHUB_PATH"
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run pretest
-      - run: pnpm test
+      - run: pnpm test   # runs pretest itself (build @leash/core, compile the circuit, write the vk)

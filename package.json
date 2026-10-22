@@ -7,7 +7,7 @@
     "build": "pnpm --filter '@leash/*' --filter 'web' build",
     "setup:tools": "./scripts/setup-tools.sh",
     "pretest": "export PATH=\"$PWD/.tools:$PATH\"; pnpm --filter @leash/core build && cd circuits && ${NARGO:-../.tools/nargo} compile && ${BB:-../.tools/bb} write_vk -b target/leash_circuit.json -o target/vk",
-    "test": "export PATH=\"$PWD/.tools:$PATH\"; pnpm --filter '@leash/*' test && cd circuits && ${NARGO:-../.tools/nargo} test && cd ../contracts && forge test",
+    "test": "pnpm run pretest && export PATH=\"$PWD/.tools:$PATH\"; pnpm --filter '@leash/*' test && cd circuits && ${NARGO:-../.tools/nargo} test && cd ../contracts && forge test",
     "test:circuits": "cd circuits && ${NARGO:-../.tools/nargo} test",
     "test:contracts": "cd contracts && forge test",
     "gen:fixture": "./scripts/gen-proof-fixture.sh",
