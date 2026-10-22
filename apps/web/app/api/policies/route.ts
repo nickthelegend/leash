@@ -38,9 +38,10 @@ export async function POST(req: NextRequest) {
       merchants: list,
     });
     // In-process on the owner device (this route is owner-device only), so no network signature.
+    // Ephemeral: the console makes fresh example policies per load; unused ones are pruned after a day.
     const registration = sharedGateway().register(
       { owner: consoleOwner(), policyCommitment: policy.policyCommitment, approvalThresholdCents: Number(approvalThresholdCents ?? 300) },
-      { trustedOwnerDevice: true }
+      { trustedOwnerDevice: true, ephemeral: true }
     );
     return NextResponse.json({ success: true, policy, registration });
   } catch (err) {

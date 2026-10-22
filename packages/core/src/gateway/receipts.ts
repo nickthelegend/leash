@@ -206,9 +206,14 @@ export class ReceiptStore {
   put(r: Receipt): Receipt {
     const map = this.load();
     map.set(ReceiptStore.key(r.policyId, r.nonce), r);
+    const before = this.stamp;
     // After a torn last line, start on a new line so this receipt isn't glued to the fragment.
-    fs.appendFileSync(this.file, (this.endsWithoutNewline() ? '\n' : '') + JSON.stringify(r) + '\n', { mode: 0o600 });
-    this.stamp = null; // re-read on next access: another process may have appended too
+    const line = (this.endsWithoutNewline() ? '\n' : '') + JSON.stringify(r) + '\n';
+    fs.appendFileSync(this.file, line, { mode: 0o600 });
+    // If the log grew by exactly this line, nobody else appended since it was read: the index is
+    // current, keep it. Otherwise (another process shares LEASH_HOME) re-read on next access.
+    const st = fs.statSync(this.file);
+    this.stamp = st.size === (before?.size ?? 0) + Buffer.byteLength(line) ? { size: st.size, mtimeMs: st.mtimeMs } : null;
     return r;
   }
 

@@ -24,7 +24,15 @@ export interface GatewayPolicy {
   /** Registration version: every change needs a higher one, so an old signed registration can't be replayed. */
   version: number;
   createdAt: string;
+  /**
+   * Set on the console's throwaway example policies (a fresh one per page load). Pruned once older
+   * than a day if they never got a receipt, a spend commitment or a vault id.
+   */
+  ephemeral?: true;
 }
+
+/** How long an unused console (ephemeral) registration is kept. */
+export const EPHEMERAL_TTL_MS = 86_400_000;
 
 export interface RegistrationInput {
   owner: string;
@@ -126,18 +134,34 @@ export class PayGateway {
    *    `version` is higher than the stored one (replays of an older registration are refused);
    *  - in-process on the owner device (the console's own routes): `{ trustedOwnerDevice: true }`.
    * Without either it throws 401. On chain, registration is bound to msg.sender instead.
+   * `ephemeral` (owner device only) marks a console example policy; registering one also prunes
+   * ephemeral registrations older than EPHEMERAL_TTL_MS with no receipt, spend commitment or vault id.
    */
   register(
     input: RegistrationInput & { signature?: string; version?: number },
-    opts: { trustedOwnerDevice?: boolean } = {}
+    opts: { trustedOwnerDevice?: boolean; ephemeral?: boolean } = {}
   ): GatewayPolicy {
+    if (opts.ephemeral && !opts.trustedOwnerDevice) throw new GatewayError(400, 'ephemeral registrations are for the owner device only');
     if (!isAddress(input.owner)) throw new GatewayError(400, 'owner must be a 0x-prefixed 20-byte address');
     if (!/^0x[0-9a-fA-F]{64}$/.test(input.policyCommitment)) throw new GatewayError(400, 'policyCommitment must be 0x + 64 hex');
     const threshold = input.approvalThresholdCents ?? 0;
     if (!Number.isInteger(threshold) || threshold < 0) throw new GatewayError(400, 'approvalThresholdCents must be a non-negative integer');
     if (input.vaultId !== undefined && !/^[0-9a-zA-Z_-]{1,255}$/.test(input.vaultId)) throw new GatewayError(400, 'vaultId must match ^[0-9a-zA-Z_-]{1,255}$');
     const policyId = policyIdOf(input.owner, input.policyCommitment);
-    return this.updateJson<Record<string, GatewayPolicy>, GatewayPolicy>('policies.json', (all) => this.applyRegistration(all, policyId, input, threshold, opts));
+    return this.updateJson<Record<string, GatewayPolicy>, GatewayPolicy>('policies.json', (all) => {
+      if (opts.ephemeral) this.pruneEphemeral(all);
+      return this.applyRegistration(all, policyId, input, threshold, opts);
+    });
+  }
+
+  /** Drop stale, unused console registrations (see GatewayPolicy.ephemeral) from `all` in place. */
+  private pruneEphemeral(all: Record<string, GatewayPolicy>): void {
+    const cutoff = Date.now() - EPHEMERAL_TTL_MS;
+    const stale = Object.values(all).filter((p) => p.ephemeral && !p.vaultId && Date.parse(p.createdAt) < cutoff);
+    if (!stale.length) return;
+    const used = new Set(this.receipts.list().map((r) => r.policyId.toLowerCase()));
+    const spend = this.readJson<Record<string, SpendRecord>>('spend.json', {});
+    for (const p of stale) if (!used.has(p.policyId) && !spend[p.policyId]) delete all[p.policyId];
   }
 
   /** register()'s check-and-set, run on policies.json as read inside its lock. */
@@ -146,7 +170,7 @@ export class PayGateway {
     policyId: string,
     input: RegistrationInput & { signature?: string; version?: number },
     threshold: number,
-    opts: { trustedOwnerDevice?: boolean }
+    opts: { trustedOwnerDevice?: boolean; ephemeral?: boolean }
   ): GatewayPolicy {
     const prev = all[policyId];
     const vaultId = input.vaultId ?? prev?.vaultId;
@@ -182,6 +206,8 @@ export class PayGateway {
       vaultId,
       version,
       createdAt: prev?.createdAt ?? new Date().toISOString(),
+      // Only an ephemeral registration keeps the flag; any other change (e.g. a vault id) makes it permanent.
+      ...(opts.ephemeral ? { ephemeral: true as const } : {}),
     };
     return all[policyId];
   }

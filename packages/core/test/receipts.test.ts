@@ -87,3 +87,46 @@ describe('PayGateway writes its state files atomically', () => {
     expect(() => gw.spendState(POLICY)).toThrow(/spend\.json is not valid JSON .* restore it/);
   });
 });
+
+describe('ReceiptStore index after its own writes', () => {
+  it('its own appends update the index without re-reading the log; another store\'s append is still picked up', () => {
+    const d = fresh();
+    const a = new ReceiptStore(d);
+    const b = new ReceiptStore(d);
+    a.put(receipt('9001'));
+    a.list();
+    const reads = vi.spyOn(fs, 'readFileSync');
+    try {
+      for (let i = 0; i < 20; i++) a.put(receipt(String(9100 + i)));
+      expect(a.list().length).toBe(21);
+      expect(reads.mock.calls.filter(([f]) => String(f).endsWith('receipts.jsonl'))).toEqual([]);
+      b.put(receipt('9200')); // another process sharing LEASH_HOME
+      a.put(receipt('9201'));
+      expect(a.get(POLICY, '9200')).toBeDefined();
+      expect(a.list().length).toBe(23);
+    } finally {
+      reads.mockRestore();
+    }
+  });
+});
+
+describe('throwaway console registrations are pruned', () => {
+  it('registering a console (ephemeral) policy drops ephemeral ones older than a day that have no receipts and no spend', () => {
+    const d = fresh();
+    const gw = new PayGateway({ dir: d, paypal: new PayPalService({ clientId: '', clientSecret: '' }) });
+    const owner = '0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266';
+    const c = (n: number) => '0x' + n.toString(16).padStart(64, '0');
+    const old = new Date(Date.now() - 2 * 86_400_000).toISOString();
+    const ids = [1, 2, 3, 4].map((n) => gw.register({ owner, policyCommitment: c(n) }, { trustedOwnerDevice: true, ephemeral: n !== 3 }).policyId);
+    // Age them: 1 (ephemeral, unused), 2 (ephemeral, has a receipt), 3 (not ephemeral), 4 (ephemeral, has spend)
+    const all = JSON.parse(fs.readFileSync(path.join(d, 'policies.json'), 'utf8'));
+    for (const id of ids) all[id].createdAt = old;
+    fs.writeFileSync(path.join(d, 'policies.json'), JSON.stringify(all));
+    gw.receipts.put({ ...receipt('1'), policyId: ids[1] });
+    fs.writeFileSync(path.join(d, 'spend.json'), JSON.stringify({ [ids[3]]: { epoch: 1, commit: c(9) } }));
+    const fresh5 = gw.register({ owner, policyCommitment: c(5) }, { trustedOwnerDevice: true, ephemeral: true });
+    expect(gw.policies().map((p) => p.policyId).sort()).toEqual([ids[1], ids[2], ids[3], fresh5.policyId].sort());
+    expect(gw.policy(ids[2])!.ephemeral).toBeUndefined();
+    expect(fresh5.ephemeral).toBe(true);
+  });
+});
