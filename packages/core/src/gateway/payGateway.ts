@@ -6,7 +6,7 @@ import { leashCustomId, PayPalService, PayPalSetupRequired, paypalService } from
 import { currentEpoch } from '../spend/spendState.js';
 import { leashHome } from '../util/paths.js';
 import { decodePublicInputs, DecodedPublicInputs, resolveCircuitsDir, verifyPaymentProof } from '../verifier/verifier.js';
-import { proofKeccak, Receipt, ReceiptStore } from './receipts.js';
+import { proofKeccak, Receipt, ReceiptStore, writeFileAtomic } from './receipts.js';
 
 /**
  * The verify-only payment gateway. It never sees a policy's rules or salts: it holds the public
@@ -82,11 +82,19 @@ export class PayGateway {
 
   private readJson<T>(name: string, fallback: T): T {
     const f = path.join(this.dir, name);
-    return fs.existsSync(f) ? (JSON.parse(fs.readFileSync(f, 'utf8')) as T) : fallback;
+    if (!fs.existsSync(f)) return fallback;
+    try {
+      return JSON.parse(fs.readFileSync(f, 'utf8')) as T;
+    } catch (e) {
+      // Fail closed (an unreadable spend.json must not reset the daily cap); writes are atomic, so this
+      // only happens if the file was damaged outside LEASH.
+      throw new GatewayError(500, `${f} is not valid JSON (${(e as Error).message}); restore it before the gateway can continue`);
+    }
   }
 
+  /** Atomic (temp file + rename): the Express gateway and the console share this directory. */
   private writeJson(name: string, value: unknown): void {
-    fs.writeFileSync(path.join(this.dir, name), JSON.stringify(value, null, 2), { mode: 0o600 });
+    writeFileAtomic(path.join(this.dir, name), JSON.stringify(value, null, 2));
   }
 
   policies(): GatewayPolicy[] {

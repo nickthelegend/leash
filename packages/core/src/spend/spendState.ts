@@ -60,7 +60,13 @@ export class SpendTracker {
       spentCents: landed.spentBeforeCents + landed.amountCents,
       commit: landed.newSpendCommit,
     };
-    if (this.persist) fs.writeFileSync(this.file(key), JSON.stringify(next, null, 2), { mode: 0o600 });
+    if (this.persist) {
+      // Atomic: a crash mid-write must not leave a half file the next proof can't open.
+      const f = this.file(key);
+      const tmp = `${f}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(next, null, 2), { mode: 0o600 });
+      fs.renameSync(tmp, f);
+    }
     else this.mem.set(key.toLowerCase(), next);
     return next;
   }
