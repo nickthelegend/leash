@@ -12,10 +12,10 @@ Built for the PayPal AI Hackathon.
 
 | Part | State |
 |---|---|
-| Noir circuit, UltraHonk verifier, `LeashPayment` contract | Done; 16 nargo + 48 forge tests on real proofs (144 tests in all, [TESTING.md](TESTING.md)) |
+| Noir circuit, UltraHonk verifier, `LeashPayment` contract | Done; 16 nargo + 48 forge tests on real proofs (173 unit tests in all plus 67 browser E2E tests, [TESTING.md](TESTING.md)) |
 | PayPal Orders v2 (create with `custom_id`, buyer approval or Vault v3 `vault_id`, capture checked against the proven cents) | **Implemented, live run pending sandbox keys** (`PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPAL_PAYEE_MERCHANT_ID`). No sandbox order has run yet. |
 | EVM rail | Runs on a local Anvil chain only. It is a **settlement stand-in**: 1 cent settles as 1 wei. |
-| Proof-gated proxy for PayPal's agent toolkit MCP server | Implemented and tested against a local stdio upstream; the live `@paypal/mcp` upstream needs `PAYPAL_ACCESS_TOKEN` (Setup required). |
+| Proof-gated proxy for PayPal's agent toolkit MCP server | Implemented (default-deny) and tested against a local stdio upstream; the live `@paypal/mcp` upstream needs `PAYPAL_ACCESS_TOKEN` (Setup required). |
 | LLM-in-the-loop policy-violation matrix | `pnpm matrix:llm`: 3 of 9 cases run live on 2026-10-21 (released / refused R2 / refused payee swap); 6 pending on the free-tier request budget. See [Testing](#testing). |
 | Public testnet deployment | **None.** Needs a funded testnet key: no captcha-free, account-free Base Sepolia or Arbitrum Sepolia faucet worked on 2026-10-21. |
 
@@ -36,7 +36,8 @@ attacker-payee, daily-cap, replay and two `SumcheckFailed` refusals, each compar
 then `verify:receipt 3001` and the balances (payee +300 wei, attacker +0). Stop the chain with
 `kill "$(cat .demo/anvil.pid)"`.
 
-The PayPal step needs sandbox credentials a judge supplies: `PAYPAL_CLIENT_ID`,
+For judging, the sandbox credentials go in Devpost's private testing-instructions field (not created
+yet: BLOCKED on the sandbox app). To run it with your own, the PayPal step needs `PAYPAL_CLIENT_ID`,
 `PAYPAL_CLIENT_SECRET` (a sandbox REST app) and `PAYPAL_PAYEE_MERCHANT_ID` (that app's sandbox
 business account), plus a sandbox **personal** account to approve the order. Without them
 `pnpm paypal:e2e` prints `Setup required (PAYPAL_CLIENT_ID)` and a numbered checklist of exactly what
@@ -265,10 +266,14 @@ leash-mcp's own `LEASH_MCP_LOG` entries (proof bytes shown as a length only). Ti
 
 ## Testing
 
-Real counts and how each layer is tested: [TESTING.md](TESTING.md): 144 passing, 1 skipped (16 nargo,
-48 forge, 70 `@leash/core`, 10 `@leash/mcp`), plus web lint and build in CI. No PayPal mocks: PayPal
-tests are pure request-body/assertion tests plus one live sandbox test that is skipped with a visible
-`Setup required (PAYPAL_CLIENT_ID)` until keys exist.
+Real counts and how each layer is tested: [TESTING.md](TESTING.md). `pnpm test`: 173 passing, 1
+skipped (16 nargo, 48 forge, 90 `@leash/core`, 19 `@leash/mcp`). Browser E2E (`e2e/stack.sh start &&
+pnpm test:e2e`, Playwright in Google Chrome against the real local stack): 67 passing (chain 10,
+desktop 32, mobile 22, paypal-merchant 2, demo 1). Web lint and build pass locally and are jobs in
+`.github/workflows/ci.yml` with `forge test` and the full `pnpm test`; GitHub has not run them on
+these commits yet (unpushed). No PayPal mocks: PayPal tests are pure request-body/assertion tests,
+real local failures (a closed port, a server that never answers), and one live sandbox test that is
+skipped with a visible `Setup required (PAYPAL_CLIENT_ID)` until keys exist.
 
 **LLM in the loop.** `pnpm matrix:llm` gives matrix prompts to a real model (opencode; its only
 tools are leash-mcp's) on a fresh Anvil chain, and reads leash-mcp's own tool log. On 2026-10-21, 3

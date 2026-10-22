@@ -9,7 +9,7 @@ Event requirements and where this entry stands (rules: paypalaihackathon.devpost
 | Requirement | Status |
 |---|---|
 | PayPal developer platform central to the project | Orders v2 + Vault v3 implemented; **no sandbox order yet** (needs keys) |
-| Judges can run it (setup incl. sandbox credentials, or a hosted URL) | `pnpm install && pnpm setup:tools && pnpm test`; PayPal step needs the judge's sandbox credentials (below). No hosted URL |
+| Judges can run it (setup incl. sandbox credentials, or a hosted URL) | `pnpm install && pnpm setup:tools && pnpm test`, then `pnpm demo:anvil && pnpm demo:agent` (no keys, no LLM). For the PayPal step the rules want the entrant's sandbox credentials: a sandbox client ID + secret and a sandbox buyer login go in Devpost's private testing-instructions field. **BLOCKED** until Nick's sandbox app exists. No hosted URL |
 | Public repo, OSS license in About | github.com/nickthelegend/leash, MIT (`LICENSE`, which GitHub shows in About) |
 | Video < 3 min, public on YouTube, showing it working end to end | 136 s Anvil recording exists, not on YouTube; a PayPal-first re-recording waits for a sandbox order |
 
@@ -61,16 +61,23 @@ pnpm demo:anvil    # local chain with the demo policy
 pnpm demo:agent    # no LLM, no keys: 1 release + the 6 recorded refusals, verify:receipt, balances (~5 s)
 pnpm paypal:e2e    # the PayPal path
 ```
-For the PayPal path a judge supplies sandbox credentials in `.env.local`: `PAYPAL_CLIENT_ID`,
-`PAYPAL_CLIENT_SECRET`, `PAYPAL_PAYEE_MERCHANT_ID` (the app's sandbox business account) and approves
-with a sandbox personal account. `pnpm paypal:e2e` without them prints the exact dashboard checklist.
+`pnpm demo:agent` replays the recorded agent run live without an LLM or keys: 300 cents released from
+escrow to openai's bound payee, then the six recorded refusals, `verify:receipt 3001` and the balances.
+For the PayPal path, put sandbox credentials in `.env.local`: `PAYPAL_CLIENT_ID`,
+`PAYPAL_CLIENT_SECRET`, `PAYPAL_PAYEE_MERCHANT_ID` (the app's sandbox business account), and approve
+with a sandbox personal account. The values for judges go in Devpost's private testing-instructions
+field (BLOCKED: not created yet). `pnpm paypal:e2e` runs the order through the verify-only gateway and
+finishes with `verify:receipt`; without keys it prints the exact dashboard checklist.
 
 ## Built with
 Noir 1.0.0-beta.16, Barretenberg 3.0.1 (UltraHonk), Solidity/Foundry, Anvil, TypeScript, Node,
 Express, Next.js 15, Model Context Protocol SDK, PayPal Orders v2 + Vault v3.
 
 ## Evidence
-- Tests: 144 passing, 1 skipped (live PayPal) — see [TESTING.md](TESTING.md); web lint + build in CI.
+- Tests: `pnpm test` 173 passing, 1 skipped (live PayPal): 16 nargo, 48 forge, 90 `@leash/core`,
+  19 `@leash/mcp`. Browser E2E in Google Chrome against the real local stack: 67 passing (chain 10,
+  desktop 32, mobile 22, paypal-merchant 2, demo 1). See [TESTING.md](TESTING.md). Web lint + build
+  pass and are CI jobs; GitHub has not run CI on these commits yet.
 - LLM-in-the-loop matrix (2026-10-21, 3 of 9 cases, free tier): released $3.00; injected $500.00
   refused by the per-payment cap; injected payee swap refused by the circuit. 6 cases pending.
   `docs/evidence/llm-matrix-2026-10-21.json`.
