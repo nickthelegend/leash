@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSpendingPolicy, paypalService, sharedGateway } from '@leash/core';
-import { consoleOwner, errorResponse, ownerDeviceEnabled, ownerDeviceOnly } from '@/lib/server';
+import { consoleOwner, errorResponse, ownerDeviceEnabled, ownerDeviceOnly, readJsonBody } from '@/lib/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,7 +24,9 @@ export async function POST(req: NextRequest) {
   const blocked = ownerDeviceOnly(req);
   if (blocked) return blocked;
   try {
-    const { name, maxPerTxCents, dailyCapCents, merchants, approvalThresholdCents } = await req.json();
+    const read = await readJsonBody(req);
+    if (read.response) return read.response;
+    const { name, maxPerTxCents, dailyCapCents, merchants, approvalThresholdCents } = read.body as Record<string, any>;
     if (!name || !maxPerTxCents || !merchants) {
       return NextResponse.json({ error: 'Missing required fields: name, maxPerTxCents, merchants' }, { status: 400 });
     }

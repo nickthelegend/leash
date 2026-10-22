@@ -60,6 +60,53 @@ export function ownerDeviceOnly(req: NextRequest): NextResponse | null {
   return null;
 }
 
+/** JSON body cap for every POST route: a proof body is ~33 KB as hex; nothing here is near 128 KB. */
+export const JSON_BODY_LIMIT = 128 * 1024;
+
+type BodyResult = { body: Record<string, unknown>; response?: undefined } | { body?: undefined; response: NextResponse };
+
+/**
+ * Guarded JSON body for the POST routes (App Router handlers have no body limit of their own):
+ *  - a browser request marked Sec-Fetch-Site: cross-site is refused (403): no other site's page can
+ *    make the console verify proofs or release payments;
+ *  - Content-Type must be application/json (415), which a cross-site page can only send after a CORS
+ *    preflight these routes never answer, so `no-cors` text/plain POSTs stop here;
+ *  - more than 128 KB is refused (413): by Content-Length when sent, and by counting the stream when
+ *    it is not (chunked), so the body is never buffered past the cap;
+ *  - the body must be a JSON object (400).
+ */
+export async function readJsonBody(req: NextRequest, limit: number = JSON_BODY_LIMIT): Promise<BodyResult> {
+  const refuse = (status: number, error: string): BodyResult => ({ response: NextResponse.json({ success: false, error }, { status }) });
+  if (req.headers.get('sec-fetch-site') === 'cross-site') return refuse(403, 'Refusing a cross-site request: only this console’s own pages and non-browser clients may call it.');
+  const type = (req.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
+  if (type !== 'application/json') return refuse(415, `Content-Type must be application/json (got '${type || 'none'}').`);
+  const declared = Number(req.headers.get('content-length') ?? NaN);
+  if (Number.isFinite(declared) && declared > limit) return refuse(413, `Request body too large (${declared} bytes; the limit is ${limit}).`);
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  if (req.body) {
+    const reader = req.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > limit) {
+        await reader.cancel().catch(() => undefined);
+        return refuse(413, `Request body too large (over ${limit} bytes).`);
+      }
+      chunks.push(value);
+    }
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(Buffer.concat(chunks).toString('utf8') || 'null');
+  } catch {
+    return refuse(400, 'Request body is not valid JSON.');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return refuse(400, 'Request body must be a JSON object.');
+  return { body: parsed as Record<string, unknown> };
+}
+
 /** Address that owns the console's policies (defaults to Anvil dev account #0). */
 export function consoleOwner(): string {
   return process.env.LEASH_CONSOLE_OWNER ?? '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';

@@ -34,7 +34,7 @@ export default defineConfig({
     },
     {
       name: 'mobile',
-      testIgnore: /(anvil-mcp|console-paypal|demo-agent|owner-device)\.spec\.ts/,
+      testIgnore: /(anvil-mcp|console-paypal|demo-agent|owner-device|public-routes)\.spec\.ts/,
       dependencies: ['chain'],
       use: { viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true },
     },

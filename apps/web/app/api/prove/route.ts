@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generatePaymentProof, NONCE_RE, PolicyViolation, SpendingPolicy } from '@leash/core';
-import { ownerDeviceOnly } from '@/lib/server';
+import { ownerDeviceOnly, readJsonBody } from '@/lib/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -10,7 +10,9 @@ export async function POST(req: NextRequest) {
   const blocked = ownerDeviceOnly(req);
   if (blocked) return blocked;
   try {
-    const body = await req.json();
+    const read = await readJsonBody(req);
+    if (read.response) return read.response;
+    const body = read.body as Record<string, any>;
     const { policy, merchantName, amountCents, nonce, useEvmTarget, recipient, spend } = body;
 
     // The console sends the policy it committed. There is no fallback to the owner's stored policy:

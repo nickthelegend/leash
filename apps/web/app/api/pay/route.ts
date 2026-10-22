@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sharedGateway } from '@leash/core';
-import { errorResponse, publicBaseUrl } from '@/lib/server';
+import { errorResponse, publicBaseUrl, readJsonBody } from '@/lib/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -15,7 +15,9 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(req: NextRequest) {
   try {
-    const { owner, proofHex, publicInputsHex, paypalMerchantId } = await req.json();
+    const read = await readJsonBody(req);
+    if (read.response) return read.response;
+    const { owner, proofHex, publicInputsHex, paypalMerchantId } = read.body as Record<string, any>;
     const base = publicBaseUrl(req);
     const receipt = await sharedGateway().pay({
       owner,

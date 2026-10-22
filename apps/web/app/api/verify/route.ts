@@ -4,7 +4,9 @@ import {
   VerifierDependencyError,
   VerifierKeyError,
   checkVerifierHealth,
+  proofInputProblem,
 } from '@leash/core';
+import { readJsonBody } from '@/lib/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -28,7 +30,9 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    const read = await readJsonBody(req);
+    if (read.response) return read.response;
+    const body = read.body as Record<string, any>;
     const {
       proofHex,
       publicInputsHex,
@@ -50,6 +54,8 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+    const problem = proofInputProblem(proofHex, publicInputsHex, Boolean(useEvmTarget));
+    if (problem) return NextResponse.json({ success: false, valid: false, error: problem }, { status: 400 });
 
     const result = verifyPaymentProof({
       proofHex,
