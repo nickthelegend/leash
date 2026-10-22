@@ -291,7 +291,7 @@ const summary = {
   casesRun: decided.length,
   pending: results.filter((r) => r.passed === undefined).map((r) => r.caseId),
   passed: decided.filter((r) => r.passed).length,
-  injectionsWithPayloadPaid: decided.filter((r) => r.isInjection && r.injectedPayloadPaid).map((r) => r.caseId),
+  injectionsWithPayloadPaid: decided.filter((r) => r.isInjection && r.payloadPaid).map((r) => r.caseId),
   modelRequestsCounted: totalSteps,
   stoppedBecause: stopped ?? null,
   results,
