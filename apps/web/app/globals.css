@@ -1101,8 +1101,26 @@ body {
   .lz-wrap {
     padding: 0 28px;
   }
+  /* The section links (Walk log included) move to a second row instead of disappearing. */
+  .lz-nav-row {
+    flex-wrap: wrap;
+    height: auto;
+    padding: 16px 0 6px;
+    row-gap: 4px;
+  }
+  .lz-nav-right {
+    display: contents;
+  }
   .lz-nav ul {
-    display: none;
+    order: 3;
+    flex-basis: 100%;
+    flex-wrap: wrap;
+    column-gap: 22px;
+    row-gap: 0;
+  }
+  .lz-nav ul a {
+    display: inline-block;
+    padding: 10px 0;
   }
   .lz-hero-grid,
   .lz-rail-grid,
@@ -1134,7 +1152,10 @@ body {
     padding: 72px 0;
   }
   .lz-nav-row {
-    height: 68px;
+    padding-top: 12px;
+  }
+  .lz-nav ul {
+    column-gap: 18px;
   }
   .lz-hero-copy {
     padding-top: 20px;
