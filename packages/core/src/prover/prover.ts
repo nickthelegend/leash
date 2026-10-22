@@ -4,7 +4,7 @@ import path from 'path';
 import { isAddress } from '../crypto/evm.js';
 import { findMerchant, getMerchantProof, SpendingPolicy } from '../policy/policy.js';
 import { currentEpoch, SpendInputs } from '../spend/spendState.js';
-import { toolPath } from '../util/paths.js';
+import { toolPath, withPrivateProverFile } from '../util/paths.js';
 import { decodePublicInputs, DecodedPublicInputs, resolveCircuitsDir } from '../verifier/verifier.js';
 
 /**
@@ -114,15 +114,12 @@ export function generatePaymentProof(req: PaymentProofRequest): PaymentProofResu
 
   const circuitsDir = resolveCircuitsDir();
   const tempId = `${Date.now()}_${process.pid}_${Math.random().toString(36).slice(2, 8)}`;
-  const tempProverFile = path.resolve(circuitsDir, `Prover_${tempId}.toml`);
   const witnessName = `witness_${tempId}`;
   const witnessPath = path.resolve(circuitsDir, `target/${witnessName}.gz`);
   const proofDir = path.resolve(circuitsDir, `target/proof_${tempId}`);
 
   try {
-    fs.writeFileSync(
-      tempProverFile,
-      proverToml([
+    const toml = proverToml([
         ['policy_commitment', policy.policyCommitment],
         ['amount', amountCents],
         ['merchant_id_hash', merklePath.merchantIdHash],
@@ -139,16 +136,17 @@ export function generatePaymentProof(req: PaymentProofRequest): PaymentProofResu
         ['spent_before', spend.spentBeforeCents],
         ['merkle_path_indices', merklePath.pathIndices],
         ['merkle_path_elements', merklePath.pathElements],
-      ]),
-      'utf-8'
-    );
+    ]);
 
     // 1. Solve the witness. A payment outside the policy fails here: no witness, no proof.
+    // The secrets go in a private temp Prover.toml (0600), never into the repo tree.
     try {
-      execFileSync(
-        toolPath('nargo'),
-        ['execute', '--package', 'leash_circuit', '--prover-name', tempProverFile.replace(/\.toml$/, ''), witnessName],
-        { cwd: circuitsDir, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }
+      withPrivateProverFile(circuitsDir, toml, (proverName) =>
+        execFileSync(toolPath('nargo'), ['execute', '--package', 'leash_circuit', '--prover-name', proverName, witnessName], {
+          cwd: circuitsDir,
+          encoding: 'utf-8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        })
       );
     } catch (err: any) {
       const out = `${err.stderr ?? ''}\n${err.stdout ?? ''}`;
@@ -182,7 +180,7 @@ export function generatePaymentProof(req: PaymentProofRequest): PaymentProofResu
       durationMs: Date.now() - startTime,
     };
   } finally {
-    for (const f of [tempProverFile, witnessPath, proofDir]) {
+    for (const f of [witnessPath, proofDir]) {
       try {
         fs.rmSync(f, { recursive: true, force: true });
       } catch {

@@ -28,3 +28,8 @@ packages/core/policy_circuit/target/*.gz
 
 # Internal agent notes (kept locally, not published)
 CLAUDE.md
+
+# nargo prover files hold policy secrets (salts, caps, allowlist); LEASH writes them to a private
+# temp dir, and older versions' leftovers must never be committed
+circuits/Prover_*.toml
+packages/core/policy_circuit/Prover_*.toml

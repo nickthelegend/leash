@@ -2,7 +2,7 @@ import { execFileSync } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { toolPath } from '../util/paths.js';
+import { toolPath, withPrivateProverFile } from '../util/paths.js';
 
 export const BN254_FR_MODULUS = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 
@@ -123,32 +123,29 @@ export function computePolicyBundle(input: PolicyBundleInput): PolicyBundle {
 
   const policyCircuitDir = resolvePolicyCircuitDir();
   const tag = `${Date.now()}_${process.pid}_${Math.random().toString(36).slice(2, 8)}`;
-  const tempProverFile = path.resolve(policyCircuitDir, `Prover_${tag}.toml`);
   const witnessName = `bundle_${tag}`;
   const arr = (xs: bigint[]) => `[${xs.map((x) => `"${x.toString()}"`).join(', ')}]`;
+  const toml = [
+    `merchant_ids = ${arr(merchantIds)}`,
+    `payees = ${arr(payees)}`,
+    `max_per_tx = "${input.maxPerTxCents}"`,
+    `daily_cap = "${input.dailyCapCents}"`,
+    `policy_salt = "${input.policySalt.toString()}"`,
+    `spend_salt = "${input.spendSalt.toString()}"`,
+  ].join('\n');
 
   try {
-    fs.writeFileSync(
-      tempProverFile,
-      [
-        `merchant_ids = ${arr(merchantIds)}`,
-        `payees = ${arr(payees)}`,
-        `max_per_tx = "${input.maxPerTxCents}"`,
-        `daily_cap = "${input.dailyCapCents}"`,
-        `policy_salt = "${input.policySalt.toString()}"`,
-        `spend_salt = "${input.spendSalt.toString()}"`,
-      ].join('\n'),
-      'utf-8'
-    );
-
-    const result = execFileSync(
-      toolPath('nargo'),
-      ['execute', '--package', 'policy_circuit', '--prover-name', tempProverFile.replace(/\.toml$/, ''), witnessName],
-      { cwd: policyCircuitDir, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }
+    // The salts and allowlist go in a private temp Prover.toml (0600), never into the repo tree.
+    const result = withPrivateProverFile(policyCircuitDir, toml, (proverName) =>
+      execFileSync(toolPath('nargo'), ['execute', '--package', 'policy_circuit', '--prover-name', proverName, witnessName], {
+        cwd: policyCircuitDir,
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
     );
     return parsePolicyBundleOutput(result);
   } finally {
-    for (const f of [tempProverFile, path.resolve(policyCircuitDir, `target/${witnessName}.gz`)]) {
+    for (const f of [path.resolve(policyCircuitDir, `target/${witnessName}.gz`)]) {
       try {
         fs.rmSync(f, { force: true });
       } catch {
