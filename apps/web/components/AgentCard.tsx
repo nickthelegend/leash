@@ -148,7 +148,8 @@ export function AgentCard({
         <button
           type="button"
           onClick={() => onTriggerPayment(agent.id, merchant, legitAmount)}
-          disabled={isLoading}
+          disabled={isLoading || !agent.commitmentHash}
+          title={agent.commitmentHash ? undefined : 'Waiting for the policy commitment'}
           className="btn btn-dark btn-sm !px-3 w-full"
         >
           Pay {legitAmount} cents
@@ -156,7 +157,8 @@ export function AgentCard({
         <button
           type="button"
           onClick={() => onTriggerPayment(agent.id, merchant, 50000)}
-          disabled={isLoading}
+          disabled={isLoading || !agent.commitmentHash}
+          title={agent.commitmentHash ? undefined : 'Waiting for the policy commitment'}
           className="btn btn-line btn-sm !px-3 w-full"
         >
           Tug $500

@@ -140,9 +140,16 @@ export default function Home() {
   };
 
   // Commit each agent's policy (cap + allowlist) server-side; the commitment is real Pedersen output.
+  // Only the answer to an agent's latest commit request is kept (answers can arrive out of order), so
+  // Pay always proves against the cap the dial shows.
   const policiesRef = React.useRef<Record<string, CommittedPolicy>>({});
+  const commitSeqRef = React.useRef<Record<string, number>>({});
+  const agentsRef = React.useRef<AgentConfig[]>(agents);
+  agentsRef.current = agents;
   const [policyError, setPolicyError] = useState<string | null>(null);
   const commitPolicy = useCallback(async (agent: AgentConfig): Promise<CommittedPolicy> => {
+    const seq = (commitSeqRef.current[agent.id] ?? 0) + 1;
+    commitSeqRef.current[agent.id] = seq;
     const res = await fetch('/api/policies', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -158,37 +165,43 @@ export default function Home() {
     if (!res.ok || !data.policy) {
       throw new Error(data.error || `Policy commit failed (HTTP ${res.status})`);
     }
-    policiesRef.current[agent.id] = data.policy;
-    setAgents((prev) =>
-      prev.map((a) =>
-        a.id === agent.id && a.capCents === data.policy.maxPerTxCents
-          ? { ...a, commitmentHash: data.policy.policyCommitment }
-          : a
-      )
-    );
+    const current = agentsRef.current.find((a) => a.id === agent.id);
+    if (commitSeqRef.current[agent.id] === seq && current?.capCents === data.policy.maxPerTxCents) {
+      policiesRef.current[agent.id] = data.policy;
+      setAgents((prev) =>
+        prev.map((a) =>
+          a.id === agent.id && a.capCents === data.policy.maxPerTxCents ? { ...a, commitmentHash: data.policy.policyCommitment } : a
+        )
+      );
+    }
     return data.policy;
   }, []);
 
+  // One commit per agent on load (a ref guard keeps StrictMode's second effect run from doubling it).
+  const initialCommitRef = React.useRef(false);
   useEffect(() => {
+    if (initialCommitRef.current) return;
+    initialCommitRef.current = true;
     Promise.all(INITIAL_AGENTS.map(commitPolicy)).catch((e: Error) =>
       setPolicyError(e.message)
     );
   }, [commitPolicy]);
 
-  // Handle spending dial adjustments
+  // Spending dial: update the cap at once, commit 300 ms after the last step (one commit per settle,
+  // not one per keypress). Pay and Tug stay disabled until the new commitment is back.
+  const capTimersRef = React.useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  useEffect(() => () => Object.values(capTimersRef.current).forEach(clearTimeout), []);
   const handleCapChange = (agentId: string, newCapCents: number) => {
-    setAgents((prev) =>
-      prev.map((agent) => {
-        if (agent.id === agentId) {
-          const next = { ...agent, capCents: newCapCents, commitmentHash: '' };
-          delete policiesRef.current[agentId];
-          delete spendRef.current[agentId];
-          commitPolicy(next).catch((e: Error) => setPolicyError(e.message));
-          return next;
-        }
-        return agent;
-      })
-    );
+    delete policiesRef.current[agentId];
+    delete spendRef.current[agentId];
+    // A commit still in flight for an older cap must not land: bump the sequence now.
+    commitSeqRef.current[agentId] = (commitSeqRef.current[agentId] ?? 0) + 1;
+    setAgents((prev) => prev.map((a) => (a.id === agentId ? { ...a, capCents: newCapCents, commitmentHash: '' } : a)));
+    clearTimeout(capTimersRef.current[agentId]);
+    capTimersRef.current[agentId] = setTimeout(() => {
+      const agent = agentsRef.current.find((a) => a.id === agentId);
+      if (agent) commitPolicy(agent).catch((e: Error) => setPolicyError(e.message));
+    }, 300);
   };
 
   // Execute payment through real Noir prover & Barretenberg verifier

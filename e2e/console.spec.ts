@@ -179,6 +179,63 @@ test('turn a spool: the cap changes and the policy is re-committed with a new ha
   expect(reg.policies.map((p: { policyCommitment: string }) => p.policyCommitment)).toContain(c);
 });
 
+test('fast spool steps commit once, and Pay proves against the cap on screen even when commits answer out of order', async ({ page, guard }) => {
+  guard.allow('/api/pay', 503);
+  const tags = await openConsole(page);
+  const research = tags.filter({ hasText: 'Research agent' });
+  await research.scrollIntoViewIfNeeded();
+  const slider = research.getByRole('slider');
+  await expect(slider).toHaveAttribute('aria-valuenow', '500');
+  const commit = research.locator('p.mono');
+  const before = await commit.getAttribute('title');
+
+  // Every policy commit from here on is held back, earlier ones longest: answers arrive in reverse order.
+  const sentCaps: number[] = [];
+  await page.route('**/api/policies', async (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    const i = sentCaps.push(route.request().postDataJSON().maxPerTxCents) - 1;
+    await new Promise((r) => setTimeout(r, Math.max(0, 600 - 60 * i)));
+    await route.continue();
+  });
+  await slider.focus();
+  for (let i = 0; i < 10; i++) await page.keyboard.press('ArrowUp');
+  await expect(slider).toHaveAttribute('aria-valuenow', '1000');
+  await expect(commit).toHaveAttribute('title', HEX64, { timeout: 30_000 });
+  await expect(commit).not.toHaveAttribute('title', before!);
+  await page.waitForTimeout(1500); // every held-back commit has answered by now
+  expect(sentCaps).toEqual([1000]); // one commit for the cap the dial settled on, not one per step
+
+  const pay = research.getByRole('button', { name: 'Pay 300 cents' });
+  await expect(pay).toBeEnabled();
+  const prove = page.waitForRequest((r) => r.url().endsWith('/api/prove'));
+  const payRes = page.waitForResponse((r) => r.url().endsWith('/api/pay'));
+  await pay.click();
+  const proven = (await prove).postDataJSON();
+  expect(proven.policy.maxPerTxCents).toBe(1000);
+  expect(proven.policy.policyCommitment).toBe(await commit.getAttribute('title'));
+  expect((await payRes).status()).toBe(503);
+  await expect(leadState(page)).toContainText('bb verify: passed');
+});
+
+test('Pay and Tug wait for the policy commitment', async ({ page }) => {
+  // Hold the first commits back: until a tag has its commitment, its Pay and Tug can't be pressed.
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  await page.route('**/api/policies', async (route) => {
+    if (route.request().method() === 'POST') await gate;
+    await route.continue();
+  });
+  await page.goto('/#console');
+  const research = page.locator('article.tag-card').filter({ hasText: 'Research agent' });
+  await research.scrollIntoViewIfNeeded();
+  await expect(research.getByRole('button', { name: 'Pay 300 cents' })).toBeDisabled();
+  await expect(research.getByRole('button', { name: 'Tug $500' })).toBeDisabled();
+  release();
+  await expect(research.locator('p.mono')).toHaveAttribute('title', HEX64, { timeout: 30_000 });
+  await expect(research.getByRole('button', { name: 'Pay 300 cents' })).toBeEnabled();
+  await expect(research.getByRole('button', { name: 'Tug $500' })).toBeEnabled();
+});
+
 test('walk test: the legit payment proves and verifies, the tug snaps, both land in the walk log', async ({ page, guard }) => {
   guard.allow('/api/pay', 503);
   guard.allow('/api/prove', 422);
