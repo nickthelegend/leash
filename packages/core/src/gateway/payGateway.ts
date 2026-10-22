@@ -6,7 +6,7 @@ import { leashCustomId, PayPalCapturePending, PayPalService, PayPalSetupRequired
 import { currentEpoch } from '../spend/spendState.js';
 import { leashHome } from '../util/paths.js';
 import { decodePublicInputs, DecodedPublicInputs, resolveCircuitsDir, verifyPaymentProof } from '../verifier/verifier.js';
-import { proofKeccak, Receipt, ReceiptStore, writeFileAtomic } from './receipts.js';
+import { proofKeccak, Receipt, ReceiptStore, withFileLock, writeFileAtomic } from './receipts.js';
 
 /**
  * The verify-only payment gateway. It never sees a policy's rules or salts: it holds the public
@@ -97,6 +97,20 @@ export class PayGateway {
     writeFileAtomic(path.join(this.dir, name), JSON.stringify(value, null, 2));
   }
 
+  /**
+   * Read-modify-write of one JSON file under its lock: `fn` gets the current content (re-read inside
+   * the lock) and changes it in place, so concurrent writers in other processes never lose each
+   * other's entries.
+   */
+  private updateJson<T extends object, R>(name: string, fn: (all: T) => R): R {
+    return withFileLock(path.join(this.dir, name), () => {
+      const all = this.readJson<T>(name, {} as T);
+      const out = fn(all);
+      this.writeJson(name, all);
+      return out;
+    });
+  }
+
   policies(): GatewayPolicy[] {
     return Object.values(this.readJson<Record<string, GatewayPolicy>>('policies.json', {}));
   }
@@ -123,7 +137,17 @@ export class PayGateway {
     if (!Number.isInteger(threshold) || threshold < 0) throw new GatewayError(400, 'approvalThresholdCents must be a non-negative integer');
     if (input.vaultId !== undefined && !/^[0-9a-zA-Z_-]{1,255}$/.test(input.vaultId)) throw new GatewayError(400, 'vaultId must match ^[0-9a-zA-Z_-]{1,255}$');
     const policyId = policyIdOf(input.owner, input.policyCommitment);
-    const all = this.readJson<Record<string, GatewayPolicy>>('policies.json', {});
+    return this.updateJson<Record<string, GatewayPolicy>, GatewayPolicy>('policies.json', (all) => this.applyRegistration(all, policyId, input, threshold, opts));
+  }
+
+  /** register()'s check-and-set, run on policies.json as read inside its lock. */
+  private applyRegistration(
+    all: Record<string, GatewayPolicy>,
+    policyId: string,
+    input: RegistrationInput & { signature?: string; version?: number },
+    threshold: number,
+    opts: { trustedOwnerDevice?: boolean }
+  ): GatewayPolicy {
     const prev = all[policyId];
     const vaultId = input.vaultId ?? prev?.vaultId;
     const prevVersion = prev?.version ?? 0;
@@ -159,7 +183,6 @@ export class PayGateway {
       version,
       createdAt: prev?.createdAt ?? new Date().toISOString(),
     };
-    this.writeJson('policies.json', all);
     return all[policyId];
   }
 
@@ -180,9 +203,9 @@ export class PayGateway {
   }
 
   private advanceSpend(policyId: string, pi: DecodedPublicInputs): void {
-    const all = this.readJson<Record<string, SpendRecord>>('spend.json', {});
-    all[policyId] = { epoch: Number(pi.epoch), commit: pi.new_spend_commit };
-    this.writeJson('spend.json', all);
+    this.updateJson<Record<string, SpendRecord>, void>('spend.json', (all) => {
+      all[policyId] = { epoch: Number(pi.epoch), commit: pi.new_spend_commit };
+    });
   }
 
   /**

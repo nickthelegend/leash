@@ -61,6 +61,59 @@ export function writeFileAtomic(file: string, data: string, mode = 0o600): void 
   fs.renameSync(tmp, file);
 }
 
+const sleepBuf = new Int32Array(new SharedArrayBuffer(4));
+function sleepSync(ms: number): void {
+  Atomics.wait(sleepBuf, 0, 0, ms);
+}
+
+function lockIsStale(lock: string, staleMs: number): boolean {
+  try {
+    const pid = Number(fs.readFileSync(lock, 'utf8').split(' ')[0]);
+    if (Number.isInteger(pid) && pid > 0 && pid !== process.pid) {
+      try {
+        process.kill(pid, 0);
+      } catch (e: any) {
+        if (e?.code === 'ESRCH') return true; // its owner is gone
+      }
+    }
+    return Date.now() - fs.statSync(lock).mtimeMs > staleMs;
+  } catch {
+    return false; // vanished between the failed open and here: just retry
+  }
+}
+
+/**
+ * Run `fn` holding an exclusive lock on `file` (<file>.lock, created with O_EXCL), so a
+ * read-modify-write by one process can't overwrite another's (the Express gateway and the Next console
+ * share LEASH_HOME/gateway). Waits with backoff; a lock whose pid is dead or older than `staleMs` is
+ * broken. `fn` must re-read the file itself, inside the lock. Synchronous like the rest of the store.
+ */
+export function withFileLock<T>(file: string, fn: () => T, opts: { timeoutMs?: number; staleMs?: number } = {}): T {
+  const lock = `${file}.lock`;
+  const deadline = Date.now() + (opts.timeoutMs ?? 10_000);
+  for (let wait = 1; ; wait = Math.min(wait * 2, 50)) {
+    try {
+      const fd = fs.openSync(lock, 'wx', 0o600);
+      fs.writeSync(fd, `${process.pid} ${new Date().toISOString()}`);
+      fs.closeSync(fd);
+      break;
+    } catch (e: any) {
+      if (e?.code !== 'EEXIST') throw e;
+      if (lockIsStale(lock, opts.staleMs ?? 15_000)) {
+        fs.rmSync(lock, { force: true });
+        continue;
+      }
+      if (Date.now() > deadline) throw new Error(`${lock} is held by another process (waited ${opts.timeoutMs ?? 10_000} ms)`);
+      sleepSync(wait + Math.random() * wait);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    fs.rmSync(lock, { force: true });
+  }
+}
+
 export function proofKeccak(proofHex: string): string {
   return keccak256Hex(proofHex);
 }
