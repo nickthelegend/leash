@@ -1,9 +1,8 @@
-import cors from 'cors';
 import dotenv from 'dotenv';
 import express, { Express, Request, Response } from 'express';
 import path from 'path';
 import { paypalService } from '../paypal/paypal.js';
-import { createVerifierRouter } from '../verifier/service.js';
+import { applyCors, createVerifierRouter, JSON_LIMIT } from '../verifier/service.js';
 import { policyIdOf } from '../crypto/evm.js';
 import { GatewayError, PayGateway, registrationMessage, sharedGateway } from './payGateway.js';
 
@@ -23,11 +22,12 @@ dotenv.config();
  *   GET  /api/spend/:policyId          latest spend commitment (the total stays hidden)
  *   GET  /api/receipts[/:nonce]        receipts (?policyId= to pick one policy)
  * Payments are released by the Next.js app's /api/pay, which uses the same PayGateway.
+ * No CORS headers unless LEASH_GATEWAY_CORS_ORIGINS lists origins; JSON bodies are capped at 128 KB.
  */
 export function createGatewayApp(gateway: PayGateway = sharedGateway()): Express {
   const app = express();
-  app.use(cors());
-  app.use(express.json({ limit: '2mb' }));
+  applyCors(app); // none unless LEASH_GATEWAY_CORS_ORIGINS lists origins
+  app.use(express.json({ limit: JSON_LIMIT }));
   app.use(createVerifierRouter());
 
   app.get('/api/health', (_req: Request, res: Response) => {

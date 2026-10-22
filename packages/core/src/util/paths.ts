@@ -66,3 +66,19 @@ export function withPrivateProverFile<T>(circuitDir: string, contents: string, f
     fs.rmSync(dir, { recursive: true, force: true });
   }
 }
+
+/**
+ * Options for every nargo / bb child process: a hard timeout (LEASH_TOOL_TIMEOUT_MS, default 30 s)
+ * with SIGKILL, so a hung tool can't block the gateway's or console's event loop indefinitely.
+ */
+export function toolExecOptions(): { timeout: number; killSignal: 'SIGKILL' } {
+  const ms = Number(process.env.LEASH_TOOL_TIMEOUT_MS);
+  return { timeout: Number.isFinite(ms) && ms > 0 ? ms : 30_000, killSignal: 'SIGKILL' };
+}
+
+/** "bb verify timed out after 30000 ms" when execFileSync hit toolExecOptions().timeout, else undefined. */
+export function toolTimeoutMessage(what: string, err: unknown): string | undefined {
+  const e = err as { code?: string; signal?: string | null; error?: { code?: string } };
+  const timedOut = e?.code === 'ETIMEDOUT' || e?.error?.code === 'ETIMEDOUT' || e?.signal === 'SIGKILL';
+  return timedOut ? `${what} timed out after ${toolExecOptions().timeout} ms` : undefined;
+}

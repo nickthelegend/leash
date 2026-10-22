@@ -2,7 +2,7 @@ import { execFileSync } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { toolPath, withPrivateProverFile } from '../util/paths.js';
+import { toolExecOptions, toolPath, toolTimeoutMessage, withPrivateProverFile } from '../util/paths.js';
 
 export const BN254_FR_MODULUS = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 
@@ -136,13 +136,20 @@ export function computePolicyBundle(input: PolicyBundleInput): PolicyBundle {
 
   try {
     // The salts and allowlist go in a private temp Prover.toml (0600), never into the repo tree.
-    const result = withPrivateProverFile(policyCircuitDir, toml, (proverName) =>
-      execFileSync(toolPath('nargo'), ['execute', '--package', 'policy_circuit', '--prover-name', proverName, witnessName], {
-        cwd: policyCircuitDir,
-        encoding: 'utf-8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-      })
-    );
+    let result: string;
+    try {
+      result = withPrivateProverFile(policyCircuitDir, toml, (proverName) =>
+        execFileSync(toolPath('nargo'), ['execute', '--package', 'policy_circuit', '--prover-name', proverName, witnessName], {
+          cwd: policyCircuitDir,
+          encoding: 'utf-8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+          ...toolExecOptions(),
+        })
+      );
+    } catch (err) {
+      const timedOut = toolTimeoutMessage('nargo execute (policy_circuit)', err);
+      throw timedOut ? new Error(timedOut) : err;
+    }
     return parsePolicyBundleOutput(result);
   } finally {
     for (const f of [path.resolve(policyCircuitDir, `target/${witnessName}.gz`)]) {

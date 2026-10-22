@@ -1,7 +1,7 @@
 import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { toolPath } from '../util/paths.js';
+import { toolExecOptions, toolPath, toolTimeoutMessage } from '../util/paths.js';
 
 export class VerifierDependencyError extends Error {
   public readonly code = 'VERIFIER_DEPENDENCY_MISSING';
@@ -111,7 +111,7 @@ function resolveBb(): string {
     if (!fs.existsSync(bb)) throw new Error(`bb not found at ${bb}`);
     return bb;
   }
-  const found = execFileSync('which', [bb], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  const found = execFileSync('which', [bb], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'], ...toolExecOptions() }).trim();
   if (!found) throw new Error('which bb returned empty path');
   return found;
 }
@@ -209,7 +209,7 @@ export function checkVerifierHealth(): VerifierHealthStatus {
   let bbAvailable = false;
   try {
     bbPath = resolveBb();
-    bbVersion = execFileSync(bbPath, ['--version'], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    bbVersion = execFileSync(bbPath, ['--version'], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'], ...toolExecOptions() }).trim();
     bbAvailable = true;
   } catch {
     bbAvailable = false;
@@ -405,7 +405,7 @@ export function verifyPaymentProof(
     execFileSync(
       deps.bbPath,
       ['verify', '-k', deps.vkPath, '-p', tempProofPath, '-i', tempPubPath, ...(useEvmTarget ? ['-t', 'evm'] : [])],
-      { cwd: deps.circuitsDir, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }
+      { cwd: deps.circuitsDir, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'], ...toolExecOptions() }
     );
 
     return {
@@ -415,7 +415,7 @@ export function verifyPaymentProof(
     };
   } catch (err: any) {
     const stderrMsg = err.stderr ? err.stderr.toString().trim() : '';
-    const errorDetail = stderrMsg || err.message || 'invalid proof';
+    const errorDetail = toolTimeoutMessage('bb verify', err) ?? (stderrMsg || err.message || 'invalid proof');
     return {
       valid: false,
       error: `Barretenberg verification failed: ${errorDetail}`,

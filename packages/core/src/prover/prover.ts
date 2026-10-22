@@ -4,7 +4,7 @@ import path from 'path';
 import { isAddress } from '../crypto/evm.js';
 import { findMerchant, getMerchantProof, SpendingPolicy } from '../policy/policy.js';
 import { currentEpoch, SpendInputs } from '../spend/spendState.js';
-import { toolPath, withPrivateProverFile } from '../util/paths.js';
+import { toolExecOptions, toolPath, toolTimeoutMessage, withPrivateProverFile } from '../util/paths.js';
 import { decodePublicInputs, DecodedPublicInputs, resolveCircuitsDir } from '../verifier/verifier.js';
 
 /**
@@ -146,9 +146,12 @@ export function generatePaymentProof(req: PaymentProofRequest): PaymentProofResu
           cwd: circuitsDir,
           encoding: 'utf-8',
           stdio: ['ignore', 'pipe', 'pipe'],
+          ...toolExecOptions(),
         })
       );
     } catch (err: any) {
+      const timedOut = toolTimeoutMessage('nargo execute', err);
+      if (timedOut) throw new Error(timedOut);
       const out = `${err.stderr ?? ''}\n${err.stdout ?? ''}`;
       const hit = CIRCUIT_RULES.find(([re]) => re.test(out));
       if (hit) {
@@ -162,11 +165,16 @@ export function generatePaymentProof(req: PaymentProofRequest): PaymentProofResu
     fs.mkdirSync(proofDir, { recursive: true });
 
     // 2. UltraHonk proof (-t evm: keccak transcript for the Solidity verifier).
-    execFileSync(
-      toolPath('bb'),
-      ['prove', '-b', bytecodePath, '-w', witnessPath, '-o', proofDir, '-k', vkPath, ...(useEvmTarget ? ['-t', 'evm'] : [])],
-      { cwd: circuitsDir, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }
-    );
+    try {
+      execFileSync(
+        toolPath('bb'),
+        ['prove', '-b', bytecodePath, '-w', witnessPath, '-o', proofDir, '-k', vkPath, ...(useEvmTarget ? ['-t', 'evm'] : [])],
+        { cwd: circuitsDir, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'], ...toolExecOptions() }
+      );
+    } catch (err) {
+      const timedOut = toolTimeoutMessage('bb prove', err);
+      throw timedOut ? new Error(timedOut) : err;
+    }
 
     const proofBuffer = fs.readFileSync(path.resolve(proofDir, 'proof'));
     const publicInputsBuffer = fs.readFileSync(path.resolve(proofDir, 'public_inputs'));

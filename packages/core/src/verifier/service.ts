@@ -104,10 +104,22 @@ export function createVerifierRouter(): Router {
   return router;
 }
 
+/**
+ * CORS for the gateway and verifier apps: none by default (the console calls its own same-origin
+ * routes); browsers on the origins in LEASH_GATEWAY_CORS_ORIGINS (comma list) may read them.
+ */
+export function applyCors(app: Express): void {
+  const origins = (process.env.LEASH_GATEWAY_CORS_ORIGINS ?? '').split(',').map((o) => o.trim()).filter(Boolean);
+  if (origins.length) app.use(cors({ origin: origins }));
+}
+
+/** JSON body cap: an UltraHonk proof is ~16 KB (~32 KB as hex); nothing these apps accept is near 128 KB. */
+export const JSON_LIMIT = '128kb';
+
 export function createVerifierApp(): Express {
   const app = express();
-  app.use(cors());
-  app.use(express.json({ limit: '10mb' }));
+  applyCors(app);
+  app.use(express.json({ limit: JSON_LIMIT }));
 
   const verifierRouter = createVerifierRouter();
   app.use(verifierRouter);
