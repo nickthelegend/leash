@@ -329,6 +329,40 @@ test('approval-threshold path: above the threshold the gateway would return an a
   await expect(page.getByRole('link', { name: 'Approve in PayPal' })).toHaveCount(0);
 });
 
+test('PayPal order return (?paypal=return&token=…): a banner says which order came back, and that no receipt here has it', async ({ page }) => {
+  await page.goto('/?paypal=return&token=TESTORDER#audit');
+  await openConsole(page);
+  const banner = page.getByRole('region', { name: 'PayPal return' });
+  await expect(banner.getByRole('heading', { name: 'Back from PayPal: order TESTORDER' })).toBeVisible();
+  await expect(banner).toContainText('No receipt on this console has order TESTORDER, so there is nothing to capture here.');
+  await expectNoHorizontalScroll(page);
+  await banner.getByRole('button', { name: 'Dismiss' }).click();
+  await expect(banner).toHaveCount(0);
+  expect(new URL(page.url()).search).toBe('');
+  await page.reload();
+  await expect(page.getByRole('region', { name: 'PayPal return' })).toHaveCount(0);
+  await page.goto('/?paypal=cancel&token=TESTORDER#audit');
+  await expect(page.getByRole('region', { name: 'PayPal return' })).toContainText('The buyer cancelled order TESTORDER at PayPal. Nothing was captured.');
+});
+
+test('agent mode: "Save PayPal for agent mode" and the vault return banner reach the vault route, which says Setup required without keys', async ({ page, guard }) => {
+  guard.allow('/api/paypal/vault', 503);
+  await openConsole(page);
+  const card = page.getByRole('note', { name: 'PayPal sandbox: setup required' });
+  await card.getByRole('button', { name: 'Save PayPal for agent mode' }).click();
+  await expect(card.getByRole('alert')).toHaveText('Setup required (PAYPAL_CLIENT_ID)');
+  // PayPal's Vault v3 return: ?vault=return&approval_token_id=<setup token>
+  await page.goto('/?vault=return&approval_token_id=8XY12345AB678901C#audit');
+  await openConsole(page);
+  const banner = page.getByRole('region', { name: 'PayPal return' });
+  await expect(banner.getByRole('heading', { name: 'Back from PayPal: wallet approved for agent mode' })).toBeVisible();
+  await expect(banner).toContainText('8XY12345AB678901C');
+  await expect(banner.getByRole('combobox', { name: 'Policy to save the wallet for' })).toHaveValue('agent_1');
+  await banner.getByRole('button', { name: 'Save for agent mode' }).click();
+  await expect(banner.getByRole('alert')).toHaveText('Setup required (PAYPAL_CLIENT_ID)');
+  await expectNoHorizontalScroll(page);
+});
+
 test('console sections are reachable from the landing and fit the viewport', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('link', { name: /Open the console/ }).click();

@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Navbar } from '@/components/Navbar';
 import { LandingHero, LandingSections, SiteFooter } from '@/components/Landing';
 import { PayPalSetupCard } from '@/components/PayPalSetupCard';
+import { PayPalReturnBanner, SaveForAgentMode } from '@/components/PayPalReturn';
 import { DemoRunner } from '@/components/DemoRunner';
 import { ZKProofIndicator, ZKStatus, ZKProofData } from '@/components/ZKProofIndicator';
 import { AgentCard, AgentConfig } from '@/components/AgentCard';
@@ -454,7 +455,9 @@ export default function Home() {
                 cents, or LeashPayment released them on the local Anvil chain (1 cent settles as 1 wei).
               </p>
             </div>
-            <PayPalSetupCard orderId={latestOrder?.paypalOrderId} orderStatus={latestOrder?.paypalStatus} />
+            <PayPalSetupCard orderId={latestOrder?.paypalOrderId} orderStatus={latestOrder?.paypalStatus}>
+              <SaveForAgentMode />
+            </PayPalSetupCard>
           </section>
 
           {/* Agent tags */}
@@ -505,6 +508,14 @@ export default function Home() {
 
           {/* Walk log, this console */}
           <section id="audit" aria-label="Walk log for this console" className="mt-4 scroll-mt-6">
+            <PayPalReturnBanner
+              receipts={receiptLogs.map((l) => ({ policyId: l.policyId, nonce: l.nonce, paypalOrderId: l.paypalOrderId, status: l.status }))}
+              targets={agents
+                .filter((a) => a.commitmentHash)
+                .map((a) => ({ id: a.id, name: a.name, policyCommitment: a.commitmentHash, approvalThresholdCents: Math.min(300, a.capCents) }))}
+              owner={owner}
+              onCapture={capture}
+            />
             {captureError && (
               <div role="alert" className="mb-3 rounded-2xl bg-no-soft px-4 py-3 text-[14px] text-no break-words">
                 {captureError}

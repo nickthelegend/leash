@@ -10,6 +10,8 @@ interface PayPalSetupCardProps {
   className?: string;
   /** light: on the paper landing; dark: inside the cobalt console. */
   tone?: 'light' | 'dark';
+  /** extra controls under the status (the console's agent-mode button) */
+  children?: React.ReactNode;
 }
 
 const ENV = ['PAYPAL_CLIENT_ID', 'PAYPAL_CLIENT_SECRET', 'PAYPAL_PAYEE_MERCHANT_ID'];
@@ -18,7 +20,7 @@ const ENV = ['PAYPAL_CLIENT_ID', 'PAYPAL_CLIENT_SECRET', 'PAYPAL_PAYEE_MERCHANT_
  * Honest status of the PayPal release path. Without a captured order from the gateway this always
  * reads "Setup required": no sandbox order has run yet, and nothing here pretends otherwise.
  */
-export function PayPalSetupCard({ orderId, orderStatus, className = '', tone = 'dark' }: PayPalSetupCardProps) {
+export function PayPalSetupCard({ orderId, orderStatus, className = '', tone = 'dark', children }: PayPalSetupCardProps) {
   const light = tone === 'light';
   if (orderId) {
     return (
@@ -42,6 +44,7 @@ export function PayPalSetupCard({ orderId, orderStatus, className = '', tone = '
             </div>
           )}
         </dl>
+        {children}
       </div>
     );
   }
@@ -69,6 +72,7 @@ export function PayPalSetupCard({ orderId, orderStatus, className = '', tone = '
         Until they are set, proofs still verify but nothing is released on this rail. A payment counts as paid only
         when PayPal reports the capture COMPLETED for exactly the proven cents.
       </p>
+      {children}
     </div>
   );
 }

@@ -18,6 +18,7 @@
     "start": "pnpm --filter @leash/core start",
     "verify:receipt": "tsx scripts/verify-receipt.ts",
     "paypal:e2e": "tsx scripts/paypal-sandbox-e2e.ts",
+    "paypal:vault": "tsx scripts/paypal-vault.ts",
     "matrix:llm": "tsx scripts/llm-matrix.ts",
     "test:e2e": "playwright test"
   },

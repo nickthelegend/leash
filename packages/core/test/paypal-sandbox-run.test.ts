@@ -57,4 +57,18 @@ describe('paypal:e2e runs through PayGateway', () => {
     expect(r.stderr).toContain('Setup required (PAYPAL_CLIENT_ID)');
     expect(r.stderr).toContain('No PayPal call was made');
   }, 60_000);
+
+  it('pnpm paypal:vault (agent-mode vault id) without keys: Setup required (PAYPAL_CLIENT_ID), exit 1, no PayPal call', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+    expect(pkg.scripts['paypal:vault']).toBe('tsx scripts/paypal-vault.ts');
+    const src = fs.readFileSync(path.join(ROOT, 'scripts/paypal-vault.ts'), 'utf8');
+    expect(src).toContain('createVaultSetupToken');
+    expect(src).toContain('createVaultPaymentToken');
+    const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('PAYPAL_')));
+    const cwd = fs.mkdtempSync(path.join(dir, 'cwd-')); // no .env.local here
+    const r = spawnSync(path.join(ROOT, 'node_modules/.bin/tsx'), [path.join(ROOT, 'scripts/paypal-vault.ts')], { cwd, env, encoding: 'utf8' });
+    expect(r.status).toBe(1);
+    expect(r.stderr.split('\n')[0]).toBe('Setup required (PAYPAL_CLIENT_ID) — also missing: PAYPAL_CLIENT_SECRET');
+    expect(r.stderr).toContain('No PayPal call was made');
+  }, 60_000);
 });
