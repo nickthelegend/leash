@@ -14,7 +14,7 @@ import path from 'node:path';
 import { SNAPS, SUMCHECKS, RUN } from '../apps/web/lib/recordedRun';
 
 const ROOT = path.resolve(__dirname, '..');
-const RUNDIR = path.join(ROOT, 'e2e/.run');
+const RUNDIR = path.resolve(ROOT, process.env.LEASH_E2E_RUN_DIR ?? 'e2e/.run');
 const mcpRequire = createRequire(path.join(ROOT, 'packages/leash-mcp/package.json'));
 const { Client } = mcpRequire('@modelcontextprotocol/sdk/client/index.js');
 const { StdioClientTransport } = mcpRequire('@modelcontextprotocol/sdk/client/stdio.js');

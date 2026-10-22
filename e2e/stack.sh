@@ -7,10 +7,14 @@
 # No PayPal keys are set here, so the PayPal rail answers "Setup required" (that state is tested).
 # State lives in e2e/.run/leash-home (LEASH_HOME), never in the developer's .leash.
 # Usage: e2e/stack.sh start | stop      PIDs go to e2e/.run/pids and are killed by PID only.
+# A second stack can run beside another one: LEASH_E2E_RUN_DIR (state + pids), LEASH_E2E_NEXT_DIST
+# (the console's Next build dir, relative to apps/web) and the LEASH_E2E_*_PORT variables below.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
-RUN="$ROOT/e2e/.run"
+RUN="${LEASH_E2E_RUN_DIR:-$ROOT/e2e/.run}"
+case "$RUN" in /*) ;; *) RUN="$ROOT/$RUN" ;; esac
+export LEASH_NEXT_DIST_DIR="${LEASH_E2E_NEXT_DIST:-.next}"
 export ANVIL_PORT="${LEASH_E2E_ANVIL_PORT:-8557}"
 WEB_PORT="${LEASH_E2E_WEB_PORT:-3107}"
 GATEWAY_PORT="${LEASH_E2E_GATEWAY_PORT:-3108}"
@@ -36,9 +40,9 @@ rm -rf "$RUN"; mkdir -p "$RUN/leash-home"
 export PATH="$ROOT/.tools:$PATH"
 
 # Chain + contracts + escrow-funded demo policy (writes .demo/anvil.env and .demo/anvil.pid)
-./scripts/demo-anvil.sh | tee "$RUN/anvil-deploy.txt"
-echo "anvil $(cat .demo/anvil.pid)" >> "$RUN/pids"
-cp .demo/anvil.env "$RUN/anvil.env"
+LEASH_DEMO_DIR="$RUN/chain" ./scripts/demo-anvil.sh | tee "$RUN/anvil-deploy.txt"
+echo "anvil $(cat "$RUN/chain/anvil.pid")" >> "$RUN/pids"
+cp "$RUN/chain/anvil.env" "$RUN/anvil.env"
 
 # Verify-only Express gateway (owner-signed registrations, receipts), same state dir as the console
 pnpm --filter @leash/core build >/dev/null
@@ -48,7 +52,8 @@ echo "gateway $!" >> "$RUN/pids"
 
 # Console: production build, owner device on, isolated state
 # Rebuild when the console or @leash/core changed since the last build (a stale build would test old code).
-if [ ! -f apps/web/.next/BUILD_ID ] || [ -n "$(find apps/web/app apps/web/components apps/web/lib apps/web/package.json packages/core/dist -newer apps/web/.next/BUILD_ID -print -quit)" ]; then
+BUILD_ID="apps/web/$LEASH_NEXT_DIST_DIR/BUILD_ID"
+if [ ! -f "$BUILD_ID" ] || [ -n "$(find apps/web/app apps/web/components apps/web/lib apps/web/package.json apps/web/next.config.mjs packages/core/dist -newer "$BUILD_ID" -print -quit)" ]; then
   pnpm --filter web build
 fi
 (

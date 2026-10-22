@@ -10,11 +10,11 @@ import path from 'node:path';
 import { SNAPS, SUMCHECKS } from '../apps/web/lib/recordedRun';
 
 const ROOT = path.resolve(__dirname, '..');
-const DEMO_DIR = 'e2e/.run/demo';
+const DEMO_DIR = path.join(path.resolve(ROOT, process.env.LEASH_E2E_RUN_DIR ?? 'e2e/.run'), 'demo');
 const env = { ...process.env, PATH: `${path.join(ROOT, '.tools')}:${process.env.PATH}`, LEASH_DEMO_DIR: DEMO_DIR, ANVIL_PORT: process.env.LEASH_E2E_DEMO_ANVIL_PORT ?? '8559' };
 
 test.afterAll(() => {
-  const pid = path.join(ROOT, DEMO_DIR, 'anvil.pid');
+  const pid = path.join(DEMO_DIR, 'anvil.pid');
   if (fs.existsSync(pid)) {
     try {
       process.kill(Number(fs.readFileSync(pid, 'utf8').trim()));
