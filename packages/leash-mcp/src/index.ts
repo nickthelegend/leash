@@ -57,6 +57,22 @@ let localReceipts: ReceiptStore | null = null;
 const receipts = () => (localReceipts ??= new ReceiptStore());
 const gatewayUrl = () => process.env.LEASH_GATEWAY_URL?.replace(/\/$/, '');
 
+/**
+ * fetch to the gateway with a deadline (LEASH_GATEWAY_TIMEOUT_MS, default 20 s): a gateway that accepts
+ * and never answers must not stall the agent's tool call for undici's ~300 s default.
+ */
+async function gatewayFetch(base: string, route: string, init: RequestInit = {}): Promise<Response> {
+  const ms = Number(process.env.LEASH_GATEWAY_TIMEOUT_MS ?? 20_000);
+  const what = `${init.method ?? 'GET'} ${route.split('?')[0]}`;
+  try {
+    return await fetch(`${base}${route}`, { ...init, signal: AbortSignal.timeout(ms) });
+  } catch (e) {
+    const name = (e as Error)?.name;
+    if (name === 'TimeoutError' || name === 'AbortError') throw new Error(`Gateway ${base} did not answer within ${ms} ms (${what})`);
+    throw new Error(`Gateway ${base} unreachable (${what}): ${String((e as Error)?.message ?? e)}`);
+  }
+}
+
 const castCall = (rpc: string, to: string, sig: string, ...args: string[]) =>
   execFileSync('cast', ['call', to, sig, ...args, '--rpc-url', rpc], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 
@@ -124,9 +140,14 @@ async function gatewaySpendInputs(commitment: string): Promise<SpendInputs> {
   const base = gatewayUrl();
   if (!base || !isAddress(owner)) throw new Error('PayPal rail not configured: set LEASH_GATEWAY_URL and LEASH_POLICY_OWNER_ADDRESS.');
   const id = policyIdOf(owner, commitment);
-  const res = await fetch(`${base}/api/spend/${id}`);
+  const res = await gatewayFetch(base, `/api/spend/${id}`);
   if (!res.ok) throw new Error(`Gateway ${base} answered ${res.status} for /api/spend`);
-  const { spend } = (await res.json()) as { spend: { epoch: number; commit: string } | null };
+  let spend: { epoch: number; commit: string } | null;
+  try {
+    ({ spend } = (await res.json()) as { spend: { epoch: number; commit: string } | null });
+  } catch (e) {
+    throw new Error(`Gateway ${base} sent an unreadable /api/spend answer: ${String((e as Error)?.message ?? e)}`);
+  }
   if (!spend || spend.epoch !== epoch || /^0x0+$/.test(spend.commit)) return { epoch, prevSpendCommit: '0', spentBeforeCents: 0 };
   const local = spendTracker.get(railKey(id, 'paypal'));
   if (local && local.epoch === epoch && local.commit.toLowerCase() === spend.commit.toLowerCase()) {
@@ -305,17 +326,23 @@ async function payPaypal(nonce: string): Promise<ToolResult> {
   }
   const overCap = await releaseRefusal(stored);
   if (overCap) return fail(overCap);
-  const res = await fetch(`${base}/api/pay`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ owner, proofHex: stored.proofHex, publicInputsHex: stored.publicInputsHex, paypalMerchantId: stored.paypalMerchantId }),
-  });
+  let res: Response;
+  try {
+    res = await gatewayFetch(base, '/api/pay', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ owner, proofHex: stored.proofHex, publicInputsHex: stored.publicInputsHex, paypalMerchantId: stored.paypalMerchantId }),
+    });
+  } catch (e) {
+    // The gateway may still have consumed it; the next proof reconciles from pending-spends.json.
+    return fail(`${(e as Error).message}; check leash_receipt for nonce '${nonce}' before retrying.`);
+  }
   let body: { success?: boolean; consumed?: boolean; error?: string; receipt?: Receipt };
   try {
     body = (await res.json()) as typeof body;
   } catch {
     // If the gateway did consume it, the next proof reconciles from pending-spends.json.
-    return fail(`Gateway ${base} answered ${res.status} with a body that is not JSON; check leash_receipt for nonce '${nonce}'.`);
+    return fail(`Gateway ${base} answered ${res.status} with a body that is not JSON (or not in time); check leash_receipt for nonce '${nonce}'.`);
   }
   if (body.consumed && body.receipt) {
     spendTracker.advance(railKey(body.receipt.policyId, 'paypal'), {
@@ -348,13 +375,13 @@ async function findReceipt(nonce: string): Promise<ToolResult> {
     const owner = policyOwner();
     const q = isAddress(owner) ? `?policyId=${policyIdOf(owner, policy().policyCommitment)}` : '';
     try {
-      const res = await fetch(`${base}/api/receipts/${encodeURIComponent(nonce)}${q}`);
+      const res = await gatewayFetch(base, `/api/receipts/${encodeURIComponent(nonce)}${q}`);
       if (res.ok) {
         const b = (await res.json()) as { receipt?: Receipt; receipts?: Receipt[] };
         found.push(...(b.receipt ? [b.receipt] : b.receipts ?? []));
       } else if (res.status !== 404) gatewayNote = `gateway answered ${res.status}`;
     } catch (e) {
-      gatewayNote = `gateway unreachable: ${String((e as Error).message)}`;
+      gatewayNote = String((e as Error).message);
     }
   }
   if (found.length === 0) return fail(`No receipt for nonce '${nonce}'${gatewayNote ? ` (${gatewayNote})` : ''}.`);
