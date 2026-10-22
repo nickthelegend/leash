@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { generatePaymentProof, getDefaultPolicy, PolicyViolation, SpendingPolicy } from '@leash/core';
+import { generatePaymentProof, PolicyViolation, SpendingPolicy } from '@leash/core';
 import { ownerDeviceOnly } from '@/lib/server';
 
 export const runtime = 'nodejs';
@@ -7,13 +7,21 @@ export const dynamic = 'force-dynamic';
 
 /** Owner-device prover (the console on the owner's machine). Disabled on a verify-only deployment. */
 export async function POST(req: NextRequest) {
-  const blocked = ownerDeviceOnly();
+  const blocked = ownerDeviceOnly(req);
   if (blocked) return blocked;
   try {
     const body = await req.json();
     const { policy, merchantName, amountCents, nonce, useEvmTarget, recipient, spend } = body;
 
-    const activePolicy: SpendingPolicy = policy || getDefaultPolicy();
+    // The console sends the policy it committed. There is no fallback to the owner's stored policy:
+    // a request without one gets no proof.
+    if (!policy || typeof policy !== 'object' || typeof policy.policyCommitment !== 'string') {
+      return NextResponse.json(
+        { success: false, error: 'Missing required parameter: policy (the committed policy to prove against; there is no default)' },
+        { status: 400 }
+      );
+    }
+    const activePolicy = policy as SpendingPolicy;
 
     if (!merchantName || amountCents === undefined) {
       return NextResponse.json(

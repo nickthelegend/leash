@@ -46,7 +46,10 @@ LEASH_HOME="$RUN/leash-home" node -e "require('./packages/core/dist/gateway/serv
 echo "gateway $!" >> "$RUN/pids"
 
 # Console: production build, owner device on, isolated state
-[ -f apps/web/.next/BUILD_ID ] || pnpm --filter web build
+# Rebuild when the console or @leash/core changed since the last build (a stale build would test old code).
+if [ ! -f apps/web/.next/BUILD_ID ] || [ -n "$(find apps/web/app apps/web/components apps/web/lib apps/web/package.json packages/core/dist -newer apps/web/.next/BUILD_ID -print -quit)" ]; then
+  pnpm --filter web build
+fi
 (
   cd apps/web
   LEASH_HOME="$RUN/leash-home" LEASH_OWNER_DEVICE=1 PORT="$WEB_PORT" \

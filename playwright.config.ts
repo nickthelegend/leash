@@ -34,7 +34,7 @@ export default defineConfig({
     },
     {
       name: 'mobile',
-      testIgnore: /anvil-mcp\.spec\.ts/,
+      testIgnore: /(anvil-mcp|owner-device)\.spec\.ts/,
       dependencies: ['chain'],
       use: { viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true },
     },

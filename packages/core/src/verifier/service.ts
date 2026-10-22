@@ -115,12 +115,13 @@ export function createVerifierApp(): Express {
   return app;
 }
 
-export function startVerifierServer(port?: number) {
+/** Loopback by default; LEASH_VERIFIER_HOST exposes it on purpose. Port 0 picks a free port. */
+export function startVerifierServer(port?: number, host: string = process.env.LEASH_VERIFIER_HOST ?? '127.0.0.1') {
   const listenPort =
-    port ||
-    Number(process.env.VERIFIER_PORT) ||
+    port ??
+    (Number(process.env.VERIFIER_PORT) ||
     Number(process.env.LEASH_VERIFIER_PORT) ||
-    3002;
+    3002);
 
   // Verify dependencies on boot and print status
   try {
@@ -133,9 +134,9 @@ export function startVerifierServer(port?: number) {
   }
 
   const app = createVerifierApp();
-  return app.listen(listenPort, () => {
+  return app.listen(listenPort, host, () => {
     console.log(
-      `[LEASH Verifier Service] Running at http://localhost:${listenPort}`
+      `[LEASH Verifier Service] Running at http://${host.includes(':') ? `[${host}]` : host}:${listenPort}`
     );
     console.log(
       `[LEASH Verifier Service] POST /verify - Real Noir UltraHonk proof verification`

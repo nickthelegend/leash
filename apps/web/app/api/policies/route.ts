@@ -21,7 +21,7 @@ export async function GET() {
  * browser, and register only its public commitment and approval threshold with the gateway.
  */
 export async function POST(req: NextRequest) {
-  const blocked = ownerDeviceOnly();
+  const blocked = ownerDeviceOnly(req);
   if (blocked) return blocked;
   try {
     const { name, maxPerTxCents, dailyCapCents, merchants, approvalThresholdCents } = await req.json();

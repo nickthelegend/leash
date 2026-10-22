@@ -63,8 +63,16 @@ to create in the PayPal Developer Dashboard, and makes no PayPal call.
   binaries first), the PayPal client (`paypal/paypal.ts`), the **verify-only** `PayGateway` with JSONL
   receipts, the spend-chain tracker and the policy-violation matrix.
 - **`apps/web`**: Next.js console and the PayPal release route. `POST /api/pay` is the only pay route.
-  Proving routes (`/api/prove`, `POST /api/policies`, `/api/harness`) need the policy secrets and run
-  only on the owner device (`next dev`, or `LEASH_OWNER_DEVICE=1`); a production build is verify-only.
+  Proving routes (`/api/prove`, `POST /api/policies`, `/api/harness`, `POST /api/paypal/vault`) need the
+  policy secrets and run only on the owner device (`next dev`, or `LEASH_OWNER_DEVICE=1`); a production
+  build is verify-only. On the owner device they answer only that machine: the console binds
+  `127.0.0.1`, the `Host` header must be `localhost` / `127.0.0.1` / `[::1]` (no LAN access, no DNS
+  rebinding), a browser request must be same-origin (`Sec-Fetch-Site`), and a body must be
+  `application/json` (no cross-site `text/plain` POST). `/api/prove` proves only the policy it is sent
+  (no fallback to the stored one), the vault route changes only the console owner's own policies, and
+  off localhost the PayPal return links need `LEASH_PUBLIC_URL` (they are never built from `Host`).
+  The Express gateway and the verifier service also bind `127.0.0.1` unless `LEASH_GATEWAY_HOST` /
+  `LEASH_VERIFIER_HOST` say otherwise.
 - **`@leash/mcp` (`packages/leash-mcp`)**: MCP server for agents. Tools: `leash_policy`,
   `leash_verifier_health`, `leash_request_payment` (prove + verify, or return the broken rule),
   `leash_execute_onchain` (EVM rail), `leash_pay_paypal` (PayPal rail via the gateway; returns the

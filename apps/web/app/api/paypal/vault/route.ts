@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { paypalService, sharedGateway } from '@leash/core';
-import { errorResponse, ownerDeviceOnly, publicBaseUrl } from '@/lib/server';
+import { consoleOwner, errorResponse, ownerDeviceOnly, publicBaseUrl } from '@/lib/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -19,10 +19,18 @@ export async function GET() {
  * POST /api/policies instead).
  */
 export async function POST(req: NextRequest) {
-  const blocked = ownerDeviceOnly();
+  const blocked = ownerDeviceOnly(req);
   if (blocked) return blocked;
   try {
     const body = await req.json();
+    // The console stores a vault id and threshold only for its own owner's policies; any other owner
+    // changes them through the gateway's owner-signed (EIP-191) POST /api/policies.
+    if (body.action === 'confirm' && String(body.owner ?? '').toLowerCase() !== consoleOwner().toLowerCase()) {
+      return NextResponse.json(
+        { success: false, error: `owner must be this console's owner (${consoleOwner()}); other owners sign a registration at the gateway's POST /api/policies` },
+        { status: 403 }
+      );
+    }
     const setup = paypalService.setupStatus();
     if (!setup.configured) return NextResponse.json({ success: false, error: setup.message }, { status: 503 });
     const base = publicBaseUrl(req);

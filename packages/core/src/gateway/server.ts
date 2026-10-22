@@ -95,9 +95,16 @@ export function createGatewayApp(gateway: PayGateway = sharedGateway()): Express
   return app;
 }
 
-export function startGatewayServer(port: number = Number(process.env.GATEWAY_PORT || process.env.PORT || 3001)) {
-  return createGatewayApp().listen(port, () => {
-    console.log(`[LEASH Gateway] verify-only, http://localhost:${port}`);
+/**
+ * Loopback by default: the gateway serves receipts and registrations for the owner device. Expose it
+ * on purpose with LEASH_GATEWAY_HOST (e.g. 0.0.0.0 behind a TLS proxy).
+ */
+export function startGatewayServer(
+  port: number = Number(process.env.GATEWAY_PORT || process.env.PORT || 3001),
+  host: string = process.env.LEASH_GATEWAY_HOST ?? '127.0.0.1'
+) {
+  return createGatewayApp().listen(port, host, () => {
+    console.log(`[LEASH Gateway] verify-only, http://${host.includes(':') ? `[${host}]` : host}:${port}`);
     console.log(`[LEASH Gateway] PayPal: ${paypalService.setupStatus().message}`);
   });
 }
