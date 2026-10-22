@@ -866,7 +866,8 @@ body {
 /* ---------- PayPal + fine print ---------- */
 .lz-rail-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* minmax(0, …): the run-it <pre> scrolls inside its column instead of widening the page */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 64px;
 }
 .lz-faq details {
@@ -1123,9 +1124,11 @@ body {
     padding: 10px 0;
   }
   .lz-hero-grid,
-  .lz-rail-grid,
   .lz-sec-head-split {
     grid-template-columns: 1fr;
+  }
+  .lz-rail-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
   .lz-hero-copy {
     padding-bottom: 24px;
