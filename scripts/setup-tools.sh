@@ -48,4 +48,4 @@ for t in node pnpm forge cast anvil jq; do
   fi
 done
 [ "$ok" = 1 ] || { echo "Setup incomplete (see above)." >&2; exit 1; }
-echo "Toolchain ready. Next: pnpm install && pnpm test"
+echo "Toolchain ready. Next: pnpm test (after pnpm install, as in the README)"

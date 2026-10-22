@@ -22,6 +22,12 @@ ESCROW_WEI="${LEASH_ESCROW_WEI:-2000}"
 PAYEE=0x70997970C51812dc3A010C7d01b50e0d17dc79C8                              # Anvil account #1 (openai's listed payee)
 export LEASH_DEMO=1 LEASH_DAILY_CAP_CENTS="${LEASH_DAILY_CAP_CENTS:-700}"
 
+# The demo policy commitment comes from the built @leash/core: fail before starting anything without it.
+[ -f packages/core/dist/index.js ] || {
+  echo "packages/core/dist is missing: run pnpm test (or pnpm --filter @leash/core build) first" >&2
+  exit 1
+}
+
 # leash-mcp proves for the EVM verifier, which needs the compiled circuit and its EVM vk (rebuilt
 # every run so a stale key from an older circuit can't linger).
 (cd circuits && nargo compile && bb write_vk -b target/leash_circuit.json -t evm -o target/vk_evm) >/dev/null 2>&1
@@ -29,6 +35,15 @@ export LEASH_DEMO=1 LEASH_DAILY_CAP_CENTS="${LEASH_DAILY_CAP_CENTS:-700}"
 
 anvil --host 127.0.0.1 --port "${ANVIL_PORT:-8545}" --code-size-limit 200000 --silent > "$DEMO_DIR/anvil.log" 2>&1 &
 echo $! > "$DEMO_DIR/anvil.pid"
+# Any later failure (forge create, cast send, …) stops this Anvil so it doesn't hold the port.
+DEMO_OK=0
+cleanup() {
+  if [ "$DEMO_OK" != 1 ]; then
+    kill "$(cat "$DEMO_DIR/anvil.pid")" 2>/dev/null || true
+    echo "demo:anvil failed; stopped the Anvil it started (pid $(cat "$DEMO_DIR/anvil.pid"))" >&2
+  fi
+}
+trap cleanup EXIT
 for _ in $(seq 30); do cast block-number --rpc-url "$RPC" >/dev/null 2>&1 && break; sleep 0.5; done
 cast block-number --rpc-url "$RPC" >/dev/null || { echo "anvil did not start" >&2; exit 1; }
 
@@ -56,6 +71,7 @@ LEASH_RECIPIENT_ADDRESS=$PAYEE
 LEASH_DEMO=1
 LEASH_DAILY_CAP_CENTS=$LEASH_DAILY_CAP_CENTS
 ENV
+DEMO_OK=1
 echo "anvil $RPC  verifier $VERIFIER  LeashPayment $PAYMENT"
 echo "demo policy commitment $COMMITMENT registered by $OWNER with $ESCROW_WEI wei escrow (cap 500/payment, $LEASH_DAILY_CAP_CENTS/day)"
 echo "relayer $RELAYER submits payments with no value; env in ${DEMO_DIR#$ROOT/}/anvil.env"
