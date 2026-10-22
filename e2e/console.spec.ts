@@ -329,6 +329,24 @@ test('approval-threshold path: above the threshold the gateway would return an a
   await expect(page.getByRole('link', { name: 'Approve in PayPal' })).toHaveCount(0);
 });
 
+test('capture: an answer that is not JSON (a crashed route) is shown as an error, not thrown away', async ({ page, guard }) => {
+  guard.allow('/api/pay/capture', 500);
+  // A receipt awaiting the buyer can't exist without PayPal keys, so this test serves one receipt in
+  // that state to the walk log (test fixture, not a PayPal order) and a plain-text 500 from the route.
+  const receipt = {
+    policyId: `0x${'ab'.repeat(32)}`, nonce: '7777', amountCents: 300, merchantIdHash: `0x${'cd'.repeat(32)}`, recipient: `0x${'ef'.repeat(20)}`,
+    epoch: Math.floor(Date.now() / 86_400_000), newSpendCommit: `0x${'12'.repeat(32)}`, proofKeccak: `0x${'34'.repeat(32)}`, vkHash: 'test',
+    proofTarget: 'default', rail: 'paypal', status: 'AWAITING_APPROVAL', paypalOrderId: 'TESTORDER', ts: new Date().toISOString(),
+  };
+  await page.route('**/api/receipts', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ receipts: [receipt] }) }));
+  await page.route('**/api/pay/capture', (route) => route.fulfill({ status: 500, contentType: 'text/plain', body: 'Internal Server Error' }));
+  await openConsole(page);
+  const log = walkLog(page);
+  await log.scrollIntoViewIfNeeded();
+  await log.getByRole('button', { name: 'Capture after approval' }).first().click();
+  await expect(log.getByRole('alert').filter({ hasText: 'Capture failed' })).toHaveText("Capture failed (HTTP 500): the server's answer was not JSON");
+});
+
 test('PayPal order return (?paypal=return&token=…): a banner says which order came back, and that no receipt here has it', async ({ page }) => {
   await page.goto('/?paypal=return&token=TESTORDER#audit');
   await openConsole(page);

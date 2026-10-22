@@ -73,6 +73,23 @@ test.describe('owner-device routes answer only this machine’s console', () => 
     }
   });
 
+  test('bad amount, merchant or recipient: 400 kind "input", never 503 "setup" (the console would say "Prover unavailable")', async () => {
+    const cases: [Record<string, unknown>, string][] = [
+      [{ amountCents: 'abc' }, 'amountCents must be a positive integer (cents)'],
+      [{ amountCents: -5 }, 'amountCents must be a positive integer (cents)'],
+      [{ amountCents: 2.5 }, 'amountCents must be a positive integer (cents)'],
+      [{ merchantName: 42 }, 'merchantName must be a non-empty string'],
+      [{ merchantName: '   ' }, 'merchantName must be a non-empty string'],
+      [{ recipient: 'not-an-address' }, 'recipient must be a 0x-prefixed 20-byte address'],
+    ];
+    for (const [patch, error] of cases) {
+      const body = JSON.stringify({ policy, merchantName: 'openai', amountCents: 300, nonce: '9', ...patch });
+      const r = await raw('POST', '/api/prove', { host: new URL(BASE).host, 'content-type': 'application/json' }, body);
+      expect(r.status, JSON.stringify(patch)).toBe(400);
+      expect(r.json).toEqual({ success: false, kind: 'input', error });
+    }
+  });
+
   test('text/plain body (a cross-site form or no-cors fetch): 415, no proof', async () => {
     const r = await raw('POST', '/api/prove', { host: new URL(BASE).host, 'content-type': 'text/plain' }, proveBody(policy));
     expect(r.status).toBe(415);

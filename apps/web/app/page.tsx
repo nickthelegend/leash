@@ -118,13 +118,18 @@ export default function Home() {
   const capture = useCallback(
     async (policyId: string, nonce: string) => {
       setCaptureError(null);
-      const res = await fetch('/api/pay/capture', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ policyId, nonce }),
-      });
-      const data = await res.json();
-      if (!data.success) setCaptureError(data.error || `Capture failed (HTTP ${res.status})`);
+      try {
+        const res = await fetch('/api/pay/capture', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ policyId, nonce }),
+        });
+        const data = await res.json().catch(() => null);
+        if (!data) setCaptureError(`Capture failed (HTTP ${res.status}): the server's answer was not JSON`);
+        else if (!data.success) setCaptureError(data.error || `Capture failed (HTTP ${res.status})`);
+      } catch (err) {
+        setCaptureError(`Capture failed: ${String((err as Error)?.message ?? err)}`);
+      }
       await fetchLogs();
     },
     [fetchLogs]

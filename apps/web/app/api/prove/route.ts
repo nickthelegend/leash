@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
     // a request without one gets no proof.
     if (!policy || typeof policy !== 'object' || typeof policy.policyCommitment !== 'string') {
       return NextResponse.json(
-        { success: false, error: 'Missing required parameter: policy (the committed policy to prove against; there is no default)' },
+        { success: false, kind: 'input', error: 'Missing required parameter: policy (the committed policy to prove against; there is no default)' },
         { status: 400 }
       );
     }
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
 
     if (nonce !== undefined && (typeof nonce !== 'string' || !NONCE_RE.test(nonce))) {
       return NextResponse.json(
-        { success: false, error: 'nonce must be a decimal integer string without leading zeros (1-30 digits)' },
+        { success: false, kind: 'input', error: 'nonce must be a decimal integer string without leading zeros (1-30 digits)' },
         { status: 400 }
       );
     }
@@ -36,18 +36,29 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           success: false,
+          kind: 'input',
           error: 'Missing required parameters: merchantName and amountCents',
         },
         { status: 400 }
       );
     }
+    // Bad input is the caller's mistake, not a missing prover: 400 kind 'input' (never 503 'setup').
+    if (typeof merchantName !== 'string' || !merchantName.trim()) {
+      return NextResponse.json({ success: false, kind: 'input', error: 'merchantName must be a non-empty string' }, { status: 400 });
+    }
+    if (typeof amountCents !== 'number' || !Number.isSafeInteger(amountCents) || amountCents <= 0) {
+      return NextResponse.json({ success: false, kind: 'input', error: 'amountCents must be a positive integer (cents)' }, { status: 400 });
+    }
+    if (recipient !== undefined && (typeof recipient !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(recipient))) {
+      return NextResponse.json({ success: false, kind: 'input', error: 'recipient must be a 0x-prefixed 20-byte address' }, { status: 400 });
+    }
 
     const proofResult = generatePaymentProof({
       policy: activePolicy,
-      merchantName: String(merchantName),
-      amountCents: Number(amountCents),
+      merchantName,
+      amountCents,
       nonce: nonce || `${Date.now()}`,
-      recipient: typeof recipient === 'string' ? recipient : undefined,
+      recipient,
       spend: spend && typeof spend === 'object' ? spend : undefined,
       useEvmTarget: Boolean(useEvmTarget),
     });
