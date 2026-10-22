@@ -90,6 +90,15 @@ describe('PayGateway (verify-only, real bb)', () => {
     expect(e.status).toBe(403);
   });
 
+  it('refuses a proof that is not hex of the exact size with 400 before decoding or verifying it', async () => {
+    const e = await payError(gw.pay({ owner: OWNER, proofHex: 'zz', publicInputsHex: proof.publicInputsHex, paypalMerchantId: MERCHANT, ...urls }));
+    expect(e.status).toBe(400);
+    expect(e.message).toBe('proofHex must be hex (0-9, a-f, optional 0x prefix)');
+    const short = await payError(gw.pay({ owner: OWNER, proofHex: proof.proofHex, publicInputsHex: '0x' + '00'.repeat(255), paypalMerchantId: MERCHANT, ...urls }));
+    expect(short.status).toBe(400);
+    expect(short.message).toBe('publicInputsHex must be 256 bytes (got 255)');
+  });
+
   it('rejects a tampered proof with bb', async () => {
     const bad = `0x${(proof.proofHex[2] === 'a' ? 'b' : 'a')}${proof.proofHex.slice(3)}`;
     const e = await payError(gw.pay({ owner: OWNER, proofHex: bad, publicInputsHex: proof.publicInputsHex, paypalMerchantId: MERCHANT, ...urls }));

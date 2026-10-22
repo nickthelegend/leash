@@ -3,6 +3,7 @@ import express, { Express, Request, Response, Router } from 'express';
 import {
   assertVerifierDependencies,
   checkVerifierHealth,
+  proofInputProblem,
   VerifierDependencyError,
   VerifierKeyError,
   verifyPaymentProof,
@@ -52,6 +53,11 @@ export function createVerifierRouter(): Router {
           error:
             'Missing required parameters: proofHex and publicInputsHex are required.',
         });
+        return;
+      }
+      const problem = proofInputProblem(proofHex, publicInputsHex, Boolean(useEvmTarget));
+      if (problem) {
+        res.status(400).json({ success: false, valid: false, error: problem });
         return;
       }
 

@@ -5,7 +5,7 @@ import { isAddress, paypalPayee, PAYPAL_MERCHANT_ID_RE, policyIdOf } from '../cr
 import { leashCustomId, PayPalCapturePending, PayPalService, PayPalSetupRequired, paypalService } from '../paypal/paypal.js';
 import { currentEpoch } from '../spend/spendState.js';
 import { leashHome } from '../util/paths.js';
-import { decodePublicInputs, DecodedPublicInputs, resolveCircuitsDir, verifyPaymentProof } from '../verifier/verifier.js';
+import { decodePublicInputs, DecodedPublicInputs, proofInputProblem, resolveCircuitsDir, verifyPaymentProof } from '../verifier/verifier.js';
 import { proofKeccak, Receipt, ReceiptStore, withFileLock, writeFileAtomic } from './receipts.js';
 
 /**
@@ -261,6 +261,8 @@ export class PayGateway {
   }): Promise<Receipt> {
     if (!isAddress(input.owner)) throw new GatewayError(400, 'owner must be the 0x address that owns the policy');
     if (!input.proofHex || !input.publicInputsHex) throw new GatewayError(400, 'proofHex and publicInputsHex are required');
+    const shape = proofInputProblem(input.proofHex, input.publicInputsHex);
+    if (shape) throw new GatewayError(400, shape);
     let pi: DecodedPublicInputs;
     try {
       pi = decodePublicInputs(Buffer.from(input.publicInputsHex.replace(/^0x/, ''), 'hex'));

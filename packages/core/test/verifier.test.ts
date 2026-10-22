@@ -158,6 +158,39 @@ describe('LEASH Noir Verifier Service', () => {
       }
     });
 
+    it('POST /verify answers 400 for a non-string or wrong-size proof, before bb runs or anything is written', async () => {
+      const server = app.listen(0);
+      const port = (server.address() as any).port;
+      const target = path.resolve(__dirname, '../../../circuits/target');
+      const before = fs.readdirSync(target).filter((f) => f.startsWith('verify_')).length;
+      try {
+        const post = (b: unknown) =>
+          fetch(`http://localhost:${port}/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
+        const cases: [unknown, string][] = [
+          [{ proofHex: 1, publicInputsHex: '00' }, 'proofHex must be a hex string'],
+          [{ proofHex: '00', publicInputsHex: '00'.repeat(256) }, 'proofHex must be 16256 bytes (got 1)'],
+          [{ proofHex: 'zz'.repeat(16256), publicInputsHex: '00'.repeat(256) }, 'proofHex must be hex (0-9, a-f, optional 0x prefix)'],
+          [{ proofHex: validProof.proofHex, publicInputsHex: ['00'] }, 'publicInputsHex must be a hex string'],
+          [{ proofHex: validProof.proofHex, publicInputsHex: '00'.repeat(255) }, 'publicInputsHex must be 256 bytes (got 255)'],
+        ];
+        for (const [body, error] of cases) {
+          const res = await post(body);
+          expect(res.status, error).toBe(400);
+          expect(await res.json()).toEqual({ success: false, valid: false, error });
+        }
+        expect(fs.readdirSync(target).filter((f) => f.startsWith('verify_')).length).toBe(before);
+      } finally {
+        server.close();
+      }
+    });
+
+    it('verifyPaymentProof reports a wrong-size proof as invalid without calling bb', () => {
+      const r = verifyPaymentProof({ proofHex: validProof.proofHex.slice(0, -2), publicInputsHex: validProof.publicInputsHex });
+      expect(r).toMatchObject({ valid: false, error: 'proofHex must be 16256 bytes (got 16255)' });
+      const evm = verifyPaymentProof({ proofHex: validProof.proofHex, publicInputsHex: validProof.publicInputsHex, useEvmTarget: true });
+      expect(evm).toMatchObject({ valid: false, error: 'proofHex must be 8640 bytes (got 16256)' });
+    });
+
     it('POST /verify returns 200 and valid=true for real Noir proof', async () => {
       const server = app.listen(0);
       const port = (server.address() as any).port;

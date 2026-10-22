@@ -46,6 +46,33 @@ export interface DecodedPublicInputs {
 
 export const PUBLIC_INPUT_COUNT = 8;
 
+/**
+ * Exact proof sizes for this circuit with the pinned bb (TOOLCHAIN.md): UltraHonk with the default
+ * transcript (gateway, console) and with the keccak transcript the Solidity verifier checks (evm).
+ */
+export const PROOF_BYTES = { default: 16256, evm: 8640 } as const;
+export const PUBLIC_INPUTS_BYTES = PUBLIC_INPUT_COUNT * 32;
+
+const HEX_BODY = /^(?:0x)?([0-9a-fA-F]*)$/;
+
+/**
+ * Why (proofHex, publicInputsHex) can't be a proof for this circuit, or undefined when both are hex
+ * strings of exactly the expected sizes. Checked before anything is written to disk or bb runs.
+ */
+export function proofInputProblem(proofHex: unknown, publicInputsHex: unknown, useEvmTarget = false): string | undefined {
+  const check = (name: string, v: unknown, bytes: number): string | undefined => {
+    if (typeof v !== 'string') return `${name} must be a hex string`;
+    const m = HEX_BODY.exec(v);
+    if (!m) return `${name} must be hex (0-9, a-f, optional 0x prefix)`;
+    if (m[1].length !== bytes * 2) return `${name} must be ${bytes} bytes (got ${m[1].length / 2})`;
+    return undefined;
+  };
+  return (
+    check('proofHex', proofHex, useEvmTarget ? PROOF_BYTES.evm : PROOF_BYTES.default) ??
+    check('publicInputsHex', publicInputsHex, PUBLIC_INPUTS_BYTES)
+  );
+}
+
 export interface VerifyProofResult {
   valid: boolean;
   error?: string;
@@ -306,6 +333,10 @@ export function verifyPaymentProof(
     expectedRecipient,
     useEvmTarget,
   } = req;
+
+  // 0. Shape: hex strings of the exact proof / public-input sizes, before any file write or bb call.
+  const problem = proofInputProblem(proofHex, publicInputsHex, Boolean(useEvmTarget));
+  if (problem) return { valid: false, error: problem, durationMs: Date.now() - startTime };
 
   // 1. Assert dependencies and keys exist - fails loudly if missing!
   const deps = assertVerifierDependencies({
