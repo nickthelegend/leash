@@ -1,9 +1,12 @@
 import fs from 'fs';
+import http from 'http';
+import net from 'net';
 import os from 'os';
 import path from 'path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { paypalPayee, policyIdOf } from '../src/crypto/evm.js';
 import { GatewayError, PayGateway } from '../src/gateway/payGateway.js';
+import { proofKeccak, Receipt } from '../src/gateway/receipts.js';
 import { createGatewayApp } from '../src/gateway/server.js';
 import { PayPalService } from '../src/paypal/paypal.js';
 import { createSpendingPolicy } from '../src/policy/policy.js';
@@ -134,5 +137,91 @@ describe('Express gateway is verify-only', () => {
     } finally {
       server.close();
     }
+  });
+});
+
+/** A port nothing listens on (bound, then released). */
+async function closedPort(): Promise<number> {
+  const srv = net.createServer();
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()));
+  const port = (srv.address() as net.AddressInfo).port;
+  await new Promise<void>((r) => srv.close(() => r()));
+  return port;
+}
+
+describe('PayPal failures before consumption cost the agent nothing; a FAILED attempt can be retried', () => {
+  // Real local failures, no PayPal stand-in: a port with no listener, and a server that accepts and never answers.
+  const freshGateway = (paypal: PayPalService) => {
+    const d = fs.mkdtempSync(path.join(dir, 'gw-'));
+    const g = new PayGateway({ dir: d, paypal });
+    g.register({ owner: OWNER, policyCommitment: policy.policyCommitment, approvalThresholdCents: 0 }, { trustedOwnerDevice: true });
+    return g;
+  };
+
+  it('configured but PayPal unreachable: 502 "PayPal authentication failed", nonce and spend untouched', async () => {
+    const pp = new PayPalService({ clientId: 'x', clientSecret: 'y', baseUrl: `http://127.0.0.1:${await closedPort()}` });
+    const g = freshGateway(pp);
+    const p = prove('7101');
+    const e = await payError(g.pay({ owner: OWNER, ...p, paypalMerchantId: MERCHANT, ...urls }));
+    expect(e.status).toBe(502);
+    expect(e.message).toMatch(/^Proof verified; nothing consumed\. PayPal authentication failed: ECONNREFUSED/);
+    expect(g.receipts.isNonceUsed(policyId, '7101')).toBe(false);
+    expect(g.spendState(policyId)).toBeUndefined();
+  });
+
+  it('a PayPal that never answers times out (no hung request) and nothing is consumed', async () => {
+    const sockets: net.Socket[] = [];
+    const silent = http.createServer(() => undefined); // accepts, never responds
+    silent.on('connection', (s) => sockets.push(s));
+    await new Promise<void>((r) => silent.listen(0, '127.0.0.1', () => r()));
+    try {
+      const pp = new PayPalService({ clientId: 'x', clientSecret: 'y', baseUrl: `http://127.0.0.1:${(silent.address() as net.AddressInfo).port}`, timeoutMs: 300 });
+      const g = freshGateway(pp);
+      const t0 = Date.now();
+      const e = await payError(g.pay({ owner: OWNER, ...prove('7102'), paypalMerchantId: MERCHANT, ...urls }));
+      expect(e.status).toBe(502);
+      expect(e.message).toContain('PayPal authentication failed: no answer within 300 ms');
+      expect(Date.now() - t0).toBeLessThan(15_000);
+      expect(g.receipts.isNonceUsed(policyId, '7102')).toBe(false);
+      expect(g.spendState(policyId)).toBeUndefined();
+    } finally {
+      sockets.forEach((s) => s.destroy());
+      silent.close();
+    }
+  });
+
+  it('resubmitting the proof of a FAILED attempt retries it instead of answering 409 "Nonce already used"', async () => {
+    const g = freshGateway(noKeys);
+    const p = prove('7103');
+    // State an earlier attempt leaves when PayPal failed after consumption: FAILED receipt + advanced spend.
+    const failed: Receipt = {
+      policyId,
+      nonce: '7103',
+      amountCents: 300,
+      merchantIdHash: p.publicInputs.merchant_id_hash,
+      recipient: p.publicInputs.recipient,
+      epoch: Number(p.publicInputs.epoch),
+      newSpendCommit: p.publicInputs.new_spend_commit,
+      proofKeccak: proofKeccak(p.proofHex),
+      vkHash: 'test',
+      proofTarget: 'default',
+      rail: 'paypal',
+      status: 'FAILED',
+      error: 'PayPal POST /v2/checkout/orders failed (500) INTERNAL_SERVER_ERROR',
+      ts: new Date().toISOString(),
+    };
+    g.receipts.put(failed);
+    fs.writeFileSync(path.join(g.dir, 'spend.json'), JSON.stringify({ [policyId]: { epoch: failed.epoch, commit: failed.newSpendCommit } }));
+    // Same proof: passes the nonce and spend checks and reaches PayPal (here: Setup required).
+    const e = await payError(g.pay({ owner: OWNER, ...p, paypalMerchantId: MERCHANT, ...urls }));
+    expect(e.status).toBe(503);
+    expect(e.message).toContain('Setup required (PAYPAL_CLIENT_ID)');
+    expect(g.receipts.get(policyId, '7103')).toMatchObject({ status: 'FAILED', error: failed.error }); // untouched
+    expect(g.spendState(policyId)!.commit).toBe(failed.newSpendCommit); // not advanced twice
+    // Another proof for the same nonce is still a replay
+    const other = prove('7103', { amount: 200 });
+    const replay = await payError(g.pay({ owner: OWNER, ...other, paypalMerchantId: MERCHANT, ...urls }));
+    expect(replay.status).toBe(409);
+    expect(replay.message).toBe('Nonce already used for this policy');
   });
 });

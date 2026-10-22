@@ -181,10 +181,13 @@ export class PayGateway {
    * Verify a proof and release it through PayPal. Everything the gateway needs comes from the proof's
    * public inputs; the caller only names the owner and the PayPal merchant id behind the proven payee.
    *
-   * Order matters: all checks (registration, nonce, spend chain, bb verify, PayPal configured, payee)
-   * run before anything is consumed.
-   * Then the nonce and spend commitment are consumed synchronously (no await in between), so two
-   * concurrent requests can't both pass.
+   * Order matters: registration, nonce, spend chain, bb verify, PayPal configured, payee, and a PayPal
+   * OAuth token (so wrong credentials or an unreachable PayPal cost the agent nothing) all come before
+   * anything is consumed. The nonce and spend checks then run again, synchronously, right before the
+   * nonce and spend commitment are consumed (no await in between), so two concurrent requests can't
+   * both pass. Only the order create/capture call can fail after consumption; that leaves a FAILED
+   * receipt, and resubmitting the same proof retries it (same PayPal-Request-Id, so PayPal does not
+   * create a second order) instead of being refused as a used nonce.
    */
   async pay(input: {
     owner: string;
@@ -206,9 +209,22 @@ export class PayGateway {
     const policyId = policyIdOf(input.owner, pi.policy_commitment);
     const reg = this.policy(policyId);
     if (!reg) throw new GatewayError(404, 'Policy not registered at this gateway (owner, commitment)');
-    if (this.receipts.isNonceUsed(policyId, pi.nonce)) throw new GatewayError(409, 'Nonce already used for this policy', { nonce: pi.nonce });
-
-    this.checkSpend(policyId, pi, input.nowMs ?? Date.now());
+    const pk = proofKeccak(input.proofHex);
+    const nowMs = input.nowMs ?? Date.now();
+    // A FAILED receipt for this exact proof is a retry: its nonce and spend were consumed by the
+    // earlier attempt, so only the PayPal step runs again.
+    const retry = this.isRetry(policyId, pi.nonce, pk);
+    const checkNonceAndSpend = () => {
+      if (retry) {
+        if (!this.isRetry(policyId, pi.nonce, pk)) throw new GatewayError(409, 'Nonce already used for this policy', { nonce: pi.nonce });
+        if (Number(pi.epoch) !== currentEpoch(nowMs)) throw new GatewayError(400, `Wrong epoch: proof is for day ${pi.epoch}, today is ${currentEpoch(nowMs)}`);
+        return;
+      }
+      const used = this.receipts.get(policyId, pi.nonce);
+      if (used) throw new GatewayError(409, 'Nonce already used for this policy', { nonce: pi.nonce, status: used.status });
+      this.checkSpend(policyId, pi, nowMs);
+    };
+    checkNonceAndSpend();
 
     const verification = verifyPaymentProof({ proofHex: input.proofHex, publicInputsHex: input.publicInputsHex });
     if (!verification.valid) throw new GatewayError(400, `Invalid ZK proof: ${verification.error}`);
@@ -231,6 +247,15 @@ export class PayGateway {
       throw new GatewayError(503, `Proof verified; nothing consumed. ${setup.message}`, { verified: true, setupRequired: setup.missing });
     }
     checkPayee();
+    // Wrong credentials, an unreachable or slow PayPal: also refused before anything is consumed.
+    try {
+      await this.paypal.getAccessToken();
+    } catch (e) {
+      if (e instanceof PayPalSetupRequired) throw new GatewayError(503, `Proof verified; nothing consumed. ${e.message}`, { verified: true, setupRequired: e.missing });
+      throw new GatewayError(502, `Proof verified; nothing consumed. ${(e as Error).message}`, { verified: true, consumed: false });
+    }
+    // The await above let other requests run: check the nonce and spend chain again, synchronously.
+    checkNonceAndSpend();
 
     const amountCents = Number(pi.amount);
     const humanApproval = amountCents > reg.approvalThresholdCents || !reg.vaultId;
@@ -242,7 +267,7 @@ export class PayGateway {
       recipient: pi.recipient,
       epoch: Number(pi.epoch),
       newSpendCommit: pi.new_spend_commit,
-      proofKeccak: proofKeccak(input.proofHex),
+      proofKeccak: pk,
       vkHash: vkHash('default'),
       proofTarget: 'default',
       rail: 'paypal',
@@ -250,10 +275,10 @@ export class PayGateway {
       custom_id: leashCustomId(policyId, pi.nonce),
       ts: new Date().toISOString(),
     };
-    // Consume: nonce (receipt exists) + spend commitment, synchronously.
+    // Consume: nonce (receipt exists) + spend commitment, synchronously. A retry consumed them already.
     this.receipts.saveProof({ proofHex: input.proofHex, publicInputsHex: input.publicInputsHex, proofTarget: 'default' });
-    this.receipts.put({ ...base, error: 'PayPal order pending' });
-    this.advanceSpend(policyId, pi);
+    this.receipts.put({ ...base, error: retry ? 'PayPal order pending (retry)' : 'PayPal order pending' });
+    if (!retry) this.advanceSpend(policyId, pi);
 
     const proven = { policyId, nonce: pi.nonce, amountCents, payeeMerchantId: input.paypalMerchantId };
     try {
@@ -266,6 +291,12 @@ export class PayGateway {
     } catch (e: any) {
       return this.receipts.put({ ...base, status: 'FAILED', error: e.message, ts: new Date().toISOString() });
     }
+  }
+
+  /** True when (policyId, nonce) has a FAILED receipt made from this same proof (keccak of the bytes). */
+  private isRetry(policyId: string, nonce: string, proofKeccakHex: string): boolean {
+    const r = this.receipts.get(policyId, nonce);
+    return r?.status === 'FAILED' && r.proofKeccak === proofKeccakHex;
   }
 
   /** Capture an approved order. COMPLETED only if PayPal reports COMPLETED for exactly the proven cents. */

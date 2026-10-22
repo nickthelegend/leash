@@ -25,6 +25,10 @@ export interface PayPalConfig {
   clientId?: string;
   clientSecret?: string;
   environment: 'sandbox' | 'live';
+  /** Override the API host (default api-m.sandbox.paypal.com / api-m.paypal.com). */
+  baseUrl?: string;
+  /** Per-request timeout in ms (default 20000, PAYPAL_TIMEOUT_MS). */
+  timeoutMs?: number;
 }
 
 export class PayPalSetupRequired extends Error {
@@ -244,12 +248,16 @@ export class PayPalService {
   private clientSecret?: string;
   readonly baseUrl: string;
   readonly environment: 'sandbox' | 'live';
+  readonly timeoutMs: number;
+  /** OAuth token, reused until a minute before it expires. */
+  private token?: { value: string; expiresAt: number };
 
   constructor(config?: Partial<PayPalConfig>) {
     this.clientId = config?.clientId ?? process.env.PAYPAL_CLIENT_ID;
     this.clientSecret = config?.clientSecret ?? process.env.PAYPAL_CLIENT_SECRET;
     this.environment = (config?.environment ?? process.env.PAYPAL_ENVIRONMENT) === 'live' ? 'live' : 'sandbox';
-    this.baseUrl = this.environment === 'live' ? 'https://api-m.paypal.com' : 'https://api-m.sandbox.paypal.com';
+    this.baseUrl = (config?.baseUrl ?? (this.environment === 'live' ? 'https://api-m.paypal.com' : 'https://api-m.sandbox.paypal.com')).replace(/\/$/, '');
+    this.timeoutMs = config?.timeoutMs ?? (Number(process.env.PAYPAL_TIMEOUT_MS) || 20_000);
   }
 
   /** Names of the env vars that are missing, e.g. ['PAYPAL_CLIENT_ID']. Never the values. */
@@ -280,26 +288,53 @@ export class PayPalService {
     if (missing.length) throw new PayPalSetupRequired(missing);
   }
 
-  /** OAuth 2.0 client-credentials token: POST /v1/oauth2/token. */
+  /** Network failure or timeout as a readable message (never the request headers). */
+  private netError(e: unknown): string {
+    const err = e as { name?: string; message?: string; cause?: { code?: string; message?: string } };
+    if (err?.name === 'TimeoutError' || err?.name === 'AbortError') return `no answer within ${this.timeoutMs} ms`;
+    return err?.cause?.code ?? err?.cause?.message ?? err?.message ?? String(e);
+  }
+
+  /**
+   * OAuth 2.0 client-credentials token: POST /v1/oauth2/token. Cached until a minute before expiry, so
+   * the gateway can check the credentials before it consumes a nonce without a second round trip later.
+   */
   async getAccessToken(): Promise<string> {
     this.requireConfigured();
+    if (this.token && this.token.expiresAt > Date.now()) return this.token.value;
     const auth = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64');
-    const res = await fetch(`${this.baseUrl}/v1/oauth2/token`, {
-      method: 'POST',
-      headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: 'grant_type=client_credentials',
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${this.baseUrl}/v1/oauth2/token`, {
+        method: 'POST',
+        headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'grant_type=client_credentials',
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+    } catch (e) {
+      throw new PayPalApiError(`PayPal authentication failed: ${this.netError(e)}`);
+    }
     if (!res.ok) throw new PayPalApiError(`PayPal authentication failed (${res.status}): ${await res.text()}`, res.status);
-    const data = (await res.json()) as { access_token: string };
+    const data = (await res.json()) as { access_token: string; expires_in?: number };
+    if (!data.access_token) throw new PayPalApiError('PayPal authentication failed: no access_token in the response', res.status);
+    const ttlMs = Math.max(0, (Number(data.expires_in) || 0) - 60) * 1000;
+    this.token = ttlMs > 0 ? { value: data.access_token, expiresAt: Date.now() + ttlMs } : undefined;
     return data.access_token;
   }
 
   private async call(method: string, path: string, headers: Record<string, string>, body?: unknown): Promise<any> {
-    const res = await fetch(`${this.baseUrl}${path}`, {
-      method,
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${this.baseUrl}${path}`, {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+    } catch (e) {
+      throw new PayPalApiError(`PayPal ${method} ${path} failed: ${this.netError(e)}`);
+    }
+    if (res.status === 401) this.token = undefined; // expired or revoked: fetch a new one next time
     const text = await res.text();
     let json: any = undefined;
     try {

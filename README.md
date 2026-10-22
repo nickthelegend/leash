@@ -104,6 +104,12 @@ capture is `COMPLETED` for exactly the proven cents.
   `payment_source.paypal.vault_id`).
 - `captureOrder(orderId)`: `PayPal-Request-Id: …-capture`; asserts order and capture `COMPLETED` and
   captured amount == proven cents.
+- Nothing is consumed until PayPal can run: the gateway gets a PayPal OAuth token (cached) before it
+  burns the nonce or advances the spend chain, so wrong credentials or an unreachable PayPal answer
+  `502 Proof verified; nothing consumed. PayPal authentication failed …` and the agent keeps its
+  budget. If the order call itself fails afterwards, the receipt is FAILED and resubmitting the same
+  proof retries it (same `PayPal-Request-Id`, so no second order). Every PayPal call times out after
+  20 s (`PAYPAL_TIMEOUT_MS`).
 - The owner sets `approvalThresholdCents` per policy: above it (or with no vaulted wallet) the order
   waits for the buyer, and the approve link is shown in the console and returned to the MCP client.
 - Receipts (`<LEASH_HOME>/gateway/receipts.jsonl`): `{policyId, nonce, amountCents, merchantIdHash,
