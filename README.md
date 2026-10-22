@@ -186,7 +186,10 @@ cents per payment, `LEASH_DAILY_CAP_CENTS` = 700 per day; openai's payee is Anvi
 owner's escrow. Unlocked dev accounts only, no private keys. The MCP environment goes to
 `.demo/anvil.env`; stop the chain with `kill "$(cat .demo/anvil.pid)"`. Set `LEASH_MCP_LOG=<file>` to
 log every tool call and its exact result as JSON lines. Amounts are cents; the chain settles 1 cent
-as 1 wei.
+as 1 wei. leash-mcp keeps the spend data of each proof it made today (no proof bytes, no secrets) in
+`<LEASH_HOME>/pending-spends.json`, so a proof that landed without leash-mcp hearing back (a relayer
+sent it, `cast send` timed out, the process restarted) is reconciled when the next proof is made
+instead of locking the policy until UTC midnight.
 
 ## Demo video
 

@@ -221,3 +221,77 @@ test('gateway registration needs the owner EIP-191 signature (signed by the Anvi
   expect(consolePolicies.policies.map((p: { policyId: string }) => p.policyId)).toContain(reg.policyId);
   expect(consolePolicies.paypal.configured).toBe(false);
 });
+
+/**
+ * A proof that lands without leash-mcp advancing its spend record (a relayer submitted it, or `cast send`
+ * timed out after the tx was mined), followed by a leash-mcp restart, must not lock the policy until UTC
+ * midnight: the next proof reconciles from the pending spend this device recorded when it proved.
+ * A second owner (Anvil #3) registers the same demo commitment as its own policy, so this spend chain and
+ * its receipts (own LEASH_HOME) are separate from the walk above that the console specs read.
+ */
+test('a proof landed outside leash-mcp, then a restart: the next proof reconciles (spent_before 100), no lock-out', async () => {
+  const OWNER3 = '0x90F79bf6EB2c4f870365E785982E1f101E93b906'; // Anvil #3
+  const contract = env.LEASH_PAYMENT_CONTRACT_ADDRESS;
+  cast('send', contract, 'registerPolicy(bytes32)', RUN.commitment, '--value', '1000', '--unlocked', '--from', OWNER3);
+  const id3 = cast('call', contract, 'policyIdOf(address,bytes32)(bytes32)', OWNER3, RUN.commitment);
+  const home3 = path.join(RUNDIR, 'leash-home-reconcile');
+  fs.mkdirSync(home3, { recursive: true });
+  const start = async () => {
+    const c = new Client({ name: 'leash-e2e-reconcile', version: '1.0.0' });
+    await c.connect(
+      new StdioClientTransport({
+        command: process.execPath,
+        args: [path.join(ROOT, 'packages/leash-mcp/dist/index.js')],
+        cwd: ROOT,
+        env: { ...(process.env as Record<string, string>), ...env, LEASH_POLICY_OWNER_ADDRESS: OWNER3, PATH: `${path.join(ROOT, '.tools')}:${process.env.PATH}`, LEASH_HOME: home3 },
+        stderr: 'pipe',
+      })
+    );
+    const callOn = async (name: string, args: Record<string, unknown>) => {
+      const r = (await c.callTool({ name, arguments: args })) as { content: Array<{ text: string }>; isError?: boolean };
+      const text = r.content.map((x) => x.text).join('\n');
+      let json: any = null;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        // plain-text error
+      }
+      return { isError: Boolean(r.isError), text, json };
+    };
+    return { c, callOn };
+  };
+
+  let mcp = await start();
+  const first = await mcp.callOn('leash_request_payment', { merchant: 'openai', amountCents: 100, nonce: '4001' });
+  expect(first.isError, first.text).toBe(false);
+  expect(first.json.spentTodayBeforeCents).toBe(0);
+  // Land it directly, the way a relayer would; leash-mcp never sees the result.
+  const pi = first.json.publicInputs;
+  const b32 = (dec: string) => '0x' + BigInt(dec).toString(16).padStart(64, '0');
+  const payee0 = balance(PAYEE);
+  cast(
+    'send', contract,
+    'executePayment(address,bytes32,uint256,bytes32,bytes32,address,(uint64,bytes32,bytes32),bytes)',
+    OWNER3, pi.policy_commitment, pi.amount, pi.merchant_id_hash, b32(pi.nonce), pi.recipient,
+    `(${pi.epoch},${pi.prev_spend_commit},${pi.new_spend_commit})`, first.json.proofHex,
+    '--unlocked', '--from', RELAYER
+  );
+  expect(balance(PAYEE) - payee0).toBe(100n);
+  expect(cast('call', contract, 'spendCommit(bytes32)(bytes32)', id3).toLowerCase()).toBe(pi.new_spend_commit);
+  await mcp.c.close(); // leash-mcp restarts: its in-memory proofs are gone
+
+  mcp = await start();
+  try {
+    const next = await mcp.callOn('leash_request_payment', { merchant: 'openai', amountCents: 100, nonce: '4002' });
+    expect(next.isError, next.text).toBe(false);
+    expect(next.json.spentTodayBeforeCents).toBe(100);
+    expect(next.json.publicInputs.prev_spend_commit).toBe(pi.new_spend_commit);
+    const sent = await mcp.callOn('leash_execute_onchain', { nonce: '4002' });
+    expect(sent.isError, sent.text).toBe(false);
+    expect(sent.json.released).toBe(true);
+    expect(sent.json.spentTodayCents).toBe(200);
+    expect(balance(PAYEE) - payee0).toBe(200n);
+  } finally {
+    await mcp.c.close();
+  }
+});

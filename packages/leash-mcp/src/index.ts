@@ -16,6 +16,7 @@ import {
   generatePaymentProof,
   getDefaultPolicy,
   isAddress,
+  leashHome,
   policyIdOf,
   proofKeccak,
   Receipt,
@@ -26,7 +27,8 @@ import {
   vkHash,
 } from '@leash/core';
 import { execFileSync } from 'node:child_process';
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { createProxyServer, ProofGatedProxy, splitCommand } from './proxy.js';
 
 /** `--demo`: prove against the fixed-salt demo policy (recordings/tests only). Default: the owner's random-salt policy. */
@@ -58,6 +60,46 @@ const castCall = (rpc: string, to: string, sig: string, ...args: string[]) =>
 /** Owner of the policy on chain (policies are keyed by (owner, commitment)). */
 const policyOwner = () => process.env.LEASH_POLICY_OWNER_ADDRESS ?? process.env.LEASH_SENDER_ADDRESS;
 
+/**
+ * Spend data of every proof this device made today, kept in <LEASH_HOME>/pending-spends.json (no proof
+ * bytes, no secrets: nonce, spent_before, amount, new_spend_commit). If a proof lands without this
+ * process advancing its spend record (a relayer submitted it, `cast send` timed out after the tx was
+ * mined, the gateway's answer was lost, leash-mcp restarted), the chain or gateway holds that proof's
+ * new_spend_commit, and the record is reconciled from here instead of locking the policy until UTC midnight.
+ */
+interface PendingSpend {
+  key: string;
+  nonce: string;
+  epoch: number;
+  spentBeforeCents: number;
+  amountCents: number;
+  newSpendCommit: string;
+}
+const pendingFile = () => join(leashHome(), 'pending-spends.json');
+function readPending(): PendingSpend[] {
+  const f = pendingFile();
+  if (!existsSync(f)) return [];
+  try {
+    return JSON.parse(readFileSync(f, 'utf8')) as PendingSpend[];
+  } catch {
+    return [];
+  }
+}
+function rememberPending(p: PendingSpend): void {
+  const keep = readPending().filter((x) => x.epoch === p.epoch && !(x.key === p.key && x.nonce === p.nonce));
+  const f = pendingFile();
+  const tmp = `${f}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify([...keep, p], null, 2), { mode: 0o600 });
+  renameSync(tmp, f);
+}
+/** Advance the spend record from the pending proof whose new commitment is the one that landed. */
+function reconcile(key: string, epoch: number, landedCommit: string): SpendInputs | undefined {
+  const hit = readPending().find((x) => x.key === key.toLowerCase() && x.epoch === epoch && x.newSpendCommit.toLowerCase() === landedCommit.toLowerCase());
+  if (!hit) return undefined;
+  const next = spendTracker.advance(key, { epoch, spentBeforeCents: hit.spentBeforeCents, amountCents: hit.amountCents, newSpendCommit: hit.newSpendCommit });
+  return { epoch, prevSpendCommit: landedCommit, spentBeforeCents: next.spentCents };
+}
+
 const spendKey = (commitment: string) => {
   const owner = policyOwner();
   return isAddress(owner) ? policyIdOf(owner, commitment) : commitment;
@@ -83,6 +125,8 @@ async function gatewaySpendInputs(commitment: string): Promise<SpendInputs> {
   if (local && local.epoch === epoch && local.commit.toLowerCase() === spend.commit.toLowerCase()) {
     return { epoch, prevSpendCommit: spend.commit, spentBeforeCents: local.spentCents };
   }
+  const reconciled = reconcile(id, epoch, spend.commit);
+  if (reconciled) return reconciled;
   throw new Error(`Gateway spend commitment ${spend.commit} is not one this device produced today; can't open it.`);
 }
 
@@ -100,6 +144,8 @@ function spendInputs(commitment: string): SpendInputs {
   if (local && local.epoch === epoch && local.commit.toLowerCase() === chainCommit) {
     return { epoch, prevSpendCommit: chainCommit, spentBeforeCents: local.spentCents };
   }
+  const reconciled = reconcile(id, epoch, chainCommit);
+  if (reconciled) return reconciled;
   throw new Error(
     `Spend commitment on chain (${chainCommit}) is not one this device produced today; can't open it to prove the daily cap. Another device spent under this policy.`
   );
@@ -219,7 +265,13 @@ async function payPaypal(nonce: string): Promise<ToolResult> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ owner, proofHex: stored.proofHex, publicInputsHex: stored.publicInputsHex, paypalMerchantId: stored.paypalMerchantId }),
   });
-  const body = (await res.json()) as { success?: boolean; consumed?: boolean; error?: string; receipt?: Receipt };
+  let body: { success?: boolean; consumed?: boolean; error?: string; receipt?: Receipt };
+  try {
+    body = (await res.json()) as typeof body;
+  } catch {
+    // If the gateway did consume it, the next proof reconciles from pending-spends.json.
+    return fail(`Gateway ${base} answered ${res.status} with a body that is not JSON; check leash_receipt for nonce '${nonce}'.`);
+  }
   if (body.consumed && body.receipt) {
     spendTracker.advance(body.receipt.policyId, {
       epoch: stored.spend.epoch,
@@ -392,6 +444,15 @@ export async function callTool(
           useEvmTarget,
         });
         if (verification.valid) {
+          const owner = policyOwner();
+          rememberPending({
+            key: (isAddress(owner) ? policyIdOf(owner, p.policyCommitment) : p.policyCommitment).toLowerCase(),
+            nonce,
+            epoch: spend.epoch,
+            spentBeforeCents: spend.spentBeforeCents,
+            amountCents,
+            newSpendCommit: proof.publicInputs.new_spend_commit,
+          });
           proofs.set(nonce, {
             proofHex: proof.proofHex,
             publicInputsHex: proof.publicInputsHex,
