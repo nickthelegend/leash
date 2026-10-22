@@ -14,3 +14,14 @@ circuits/target/
 e2e/.run/
 e2e/test-results/
 e2e/playwright-report/
+
+# Pre-push audit: local secrets and state, videos, Playwright output
+.env
+.env.*
+!.env.example
+*.mp4
+*.mov
+*.webm
+test-results/
+playwright-report/
+packages/core/policy_circuit/target/*.gz
