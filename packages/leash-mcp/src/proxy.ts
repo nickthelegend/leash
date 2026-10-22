@@ -35,6 +35,7 @@ import {
   ReceiptStore,
   SpendingPolicy,
   SpendTracker,
+  valueToCents,
   verifyPaymentProof,
   vkHash,
 } from '@leash/core';
@@ -178,6 +179,13 @@ export class ProofGatedProxy {
     if (typeof amountCents === 'string') return refuse(amountCents);
 
     const { policy, policyId } = this.opts;
+    // Only a PayPal merchant's proof may authorize a PayPal order: a proof for an EVM-payee merchant
+    // (e.g. openai) binds an EVM address, which says nothing about who the PayPal order pays.
+    // (An unlisted merchant falls through to the prover, which refuses it as Rule R1.)
+    const listed = policy.merchantLeaves.find((m) => m.name === merchant.trim().toLowerCase());
+    if (listed && !listed.paypalMerchantId) {
+      return refuse(`merchant '${listed.name}' is paid on the EVM rail (payee ${listed.payee}), not a PayPal merchant; its proof can't authorize a PayPal order`);
+    }
     const epoch = currentEpoch();
     const spendInputs = this.spend.inputs(policyId, epoch);
     let proof;
@@ -200,7 +208,7 @@ export class ProofGatedProxy {
         : { ...upstreamArgs, notes: [upstreamArgs.notes, `leash:${customId}`].filter(Boolean).join(' ') };
 
     // Consume nonce + spend before the upstream call so a parallel call with the same nonce/prev fails.
-    const leaf = policy.merchantLeaves.find((m) => m.name === merchant.trim().toLowerCase())!;
+    const leaf = listed!; // the prover refused unlisted merchants above
     const base: Receipt = {
       policyId,
       nonce,
@@ -229,10 +237,12 @@ export class ProofGatedProxy {
       : order?.status === 'PAYER_ACTION_REQUIRED' || order?.status === 'CREATED'
         ? 'AWAITING_APPROVAL'
         : 'FORWARDED';
-    const payeeMismatch = Boolean(payee && leaf.paypalMerchantId && payee !== leaf.paypalMerchantId);
+    const payeeMismatch = Boolean(payee && payee !== leaf.paypalMerchantId);
     this.receipts.put({
       ...base,
       status: payeeMismatch ? 'FAILED' : status,
+      // Absent payee (e.g. a return=minimal response): unverified; pay_order checks it with get_order first.
+      payeeVerified: Boolean(payee) && !payeeMismatch,
       paypalOrderId: typeof order?.id === 'string' ? order.id : undefined,
       approveUrl: order?.links?.find?.((l: any) => l.rel === 'payer-action' || l.rel === 'approve')?.href,
       error: payeeMismatch ? `upstream order payee ${payee} is not the allowlisted ${leaf.paypalMerchantId}` : result.isError ? 'upstream error' : undefined,
@@ -247,11 +257,61 @@ export class ProofGatedProxy {
     };
   }
 
+  /**
+   * Before capturing an order whose create response did not name the payee: read it back with the
+   * upstream's read-only get_order and require purchase_units[0].payee.merchant_id to be the
+   * allowlisted PayPal merchant (and the amount, when reported, to be the proven cents).
+   * Returns a refusal, or undefined when the payee is verified (the receipt is updated).
+   */
+  private async verifyPayee(id: string, r: Receipt): Promise<ToolResult | undefined> {
+    const leaf = this.opts.policy.merchantLeaves.find((m) => m.hash === r.merchantIdHash);
+    if (!leaf?.paypalMerchantId) return refuse(`order ${id}: its proof is not for a PayPal merchant in this policy`);
+    if (!this.tools.some((t) => t.name === 'get_order')) {
+      return refuse(`order ${id}: payee unverified (the create response named none) and the upstream has no get_order to check it`);
+    }
+    const got = (await this.client.callTool({ name: 'get_order', arguments: { id } })) as ToolResult;
+    const order = got.isError ? undefined : parseJson(got);
+    const unit = order?.purchase_units?.[0];
+    const payee = unit?.payee?.merchant_id;
+    if (!payee) {
+      return refuse(`order ${id}: PayPal did not report purchase_units[0].payee.merchant_id, so the payee is unverified; not capturing`);
+    }
+    if (payee !== leaf.paypalMerchantId) {
+      const error = `order payee ${payee} is not the allowlisted ${leaf.paypalMerchantId}`;
+      this.receipts.put({ ...r, status: 'FAILED', error, ts: new Date().toISOString() });
+      return refuse(`order ${id}: ${error}; not capturing`);
+    }
+    const value = unit?.amount?.value;
+    if (value !== undefined) {
+      let cents: number | undefined;
+      try {
+        cents = valueToCents(String(value));
+      } catch {
+        cents = undefined;
+      }
+      if (cents !== r.amountCents || (unit?.amount?.currency_code ?? 'USD') !== 'USD') {
+        return refuse(`order ${id}: amount ${value} ${unit?.amount?.currency_code ?? '(no currency)'} is not the proven ${r.amountCents} cents; not capturing`);
+      }
+    }
+    this.receipts.put({ ...r, payeeVerified: true, ts: new Date().toISOString() });
+    return undefined;
+  }
+
   private async gatedCapture(args: Record<string, any>): Promise<ToolResult> {
     const id = args?.id;
-    const r = typeof id === 'string' ? this.receipts.byOrderId(id) : undefined;
+    let r = typeof id === 'string' ? this.receipts.byOrderId(id) : undefined;
     if (!r) return refuse(`order ${String(id)} was not created through a verified LEASH proof`);
     if (r.status === 'COMPLETED') return refuse(`order ${id} is already captured`);
+    // Same rule as PayGateway.capture: only an order waiting for the buyer can be captured. A FAILED
+    // order (payee mismatch, upstream error) or one the upstream gave no status for never is.
+    if (r.status !== 'AWAITING_APPROVAL') {
+      return refuse(`order ${id} is ${r.status}${r.error ? ` (${r.error})` : ''}; only an order awaiting approval can be captured`);
+    }
+    if (!r.payeeVerified) {
+      const unverified = await this.verifyPayee(id, r);
+      if (unverified) return unverified;
+      r = this.receipts.byOrderId(id)!;
+    }
     const result = (await this.client.callTool({ name: 'pay_order', arguments: { id } })) as ToolResult;
     if (result.isError) return result;
     try {

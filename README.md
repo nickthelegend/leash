@@ -118,8 +118,10 @@ It re-exports the upstream tool names. `create_order` additionally requires `non
 the proxy computes the order total from `items`, proves it locally, verifies it, sends
 `keccak256(public inputs)` upstream (as `custom_id` if the tool has one, otherwise appended to
 `notes`: `@paypal/mcp`'s `create_order` has no `custom_id` field), forwards, and records a receipt.
-`pay_order` is only allowed for orders created that way, and the capture must match the proven
-cents. Everything else is **default-deny**: only read-only tools (`get_*`, `list_*`, `show_*`, e.g.
+`pay_order` is only allowed for orders created that way that are awaiting approval and whose payee
+PayPal reported as the allowlisted merchant (checked with `get_order` first when the create response
+named none), and the capture must match the proven cents. A proof for an EVM-payee merchant can't
+create a PayPal order. Everything else is **default-deny**: only read-only tools (`get_*`, `list_*`, `show_*`, e.g.
 `get_order`) pass through without a proof. Every other upstream tool, which under `--tools=all`
 includes `create_refund`, `create_subscription`, `send_invoice` and `accept_dispute_claim`, is
 hidden from `tools/list` and refused with `LEASH refused: <tool> moves money and is not proof-gated`;
@@ -244,8 +246,11 @@ refused by the per-payment cap, and the injected "new bank details" payee was re
   implemented and unit-tested, not proven live.
 - The EVM rail has run on local Anvil only; leash-mcp's on-chain tool refuses any chain id but 31337.
 - The proxy's amount check knows the `@paypal/agent-toolkit` `create_order` shape (items, tax,
-  shipping, discount, USD). The toolkit charges the account behind `PAYPAL_ACCESS_TOKEN`; the proxy
-  flags a mismatch only when the upstream response includes `payee.merchant_id`.
+  shipping, discount, USD). The toolkit's orders pay the account behind `PAYPAL_ACCESS_TOKEN`, so
+  the proxy only creates orders for a PayPal merchant in the policy and refuses `pay_order` unless the
+  order is awaiting approval and PayPal named the allowlisted `payee.merchant_id` (in the create
+  response, or in a `get_order` read made before the capture). An order flagged with a payee
+  mismatch is marked FAILED and is never captured.
 - One 16-leaf (depth-4) allowlist per policy; a proof made just before UTC midnight is rejected after it.
 - Proving and verification need the pinned `nargo` and `bb` binaries.
 

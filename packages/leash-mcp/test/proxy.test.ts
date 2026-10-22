@@ -4,8 +4,8 @@ import path from 'path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { keccak256Hex, ReceiptStore } from '@leash/core';
-import { orderTotalCents, splitCommand, toolPolicy } from '../src/proxy.js';
+import { createSpendingPolicy, keccak256Hex, policyIdOf, Receipt, ReceiptStore, SpendTracker } from '@leash/core';
+import { orderTotalCents, ProofGatedProxy, splitCommand, toolPolicy } from '../src/proxy.js';
 
 // End to end over stdio: MCP client -> leash-mcp --upstream (real nargo + bb proofs) -> echo fixture.
 const ROOT = path.resolve(__dirname, '../../..');
@@ -63,7 +63,7 @@ describe('helpers', () => {
 describe('leash-mcp --upstream (proof-gated proxy)', () => {
   it('re-exports the upstream tool names; create_order now requires nonce and merchant', async () => {
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name).sort()).toEqual(['create_order', 'get_info', 'pay_order']);
+    expect(tools.map((t) => t.name).sort()).toEqual(['create_order', 'get_info', 'get_order', 'pay_order']);
     const create = tools.find((t) => t.name === 'create_order')!;
     expect(create.inputSchema.required).toEqual(expect.arrayContaining(['currencyCode', 'items', 'nonce', 'merchant']));
   });
@@ -106,6 +106,15 @@ describe('leash-mcp --upstream (proof-gated proxy)', () => {
     expect(textOf(r)).toMatch(/Rule R1 Violation/);
   });
 
+  it('refuses a PayPal order backed by an EVM-payee merchant (openai) and forwards nothing', async () => {
+    const before = forwarded().length;
+    const r: any = await client.callTool({ name: 'create_order', arguments: { currencyCode: 'USD', items: item(3), nonce: '504', merchant: 'openai' } });
+    expect(r.isError).toBe(true);
+    expect(textOf(r)).toMatch(/^LEASH refused: merchant 'openai' is paid on the EVM rail .* not a PayPal merchant/);
+    expect(forwarded().length).toBe(before);
+    expect(new ReceiptStore(home).byNonce('504')).toEqual([]); // nonce not consumed
+  });
+
   it('proves a $3.00 order, injects keccak(public inputs) into notes, forwards once, records a receipt', async () => {
     const before = forwarded().length;
     const r: any = await client.callTool({
@@ -144,5 +153,82 @@ describe('leash-mcp --upstream (proof-gated proxy)', () => {
     expect(r.isError).toBe(true);
     expect(textOf(r)).toMatch(/not created through a verified LEASH proof/);
     expect(forwarded().length).toBe(before);
+  });
+});
+
+// In-process proxy over the same echo upstream, with receipts placed in its store: pay_order must only
+// ever forward for an order that is AWAITING_APPROVAL and whose PayPal payee is the allowlisted one.
+describe('pay_order is refused unless the order awaits approval and its payee is verified', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'leash-capture-'));
+  const log = path.join(dir, 'echo.jsonl');
+  const calls = () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
+  const policy = createSpendingPolicy({
+    name: 'capture rules',
+    maxPerTxCents: 500,
+    merchants: [{ name: 'paypal-shop', paypalMerchantId: 'ABCDEFGHJKLMN' }, { name: 'openai' }],
+    policySalt: '515151',
+    spendSalt: '525252',
+  });
+  const policyId = policyIdOf('0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266', policy.policyCommitment);
+  const store = new ReceiptStore(dir);
+  let proxy: ProofGatedProxy;
+  const receipt = (nonce: string, orderId: string, extra: Partial<Receipt>): Receipt => ({
+    policyId,
+    nonce,
+    amountCents: 300,
+    merchantIdHash: policy.merchantLeaves[0].hash,
+    recipient: policy.merchantLeaves[0].payee,
+    epoch: 20748,
+    newSpendCommit: '0x' + '1'.repeat(64),
+    proofKeccak: '0x' + '2'.repeat(64),
+    vkHash: 'test',
+    proofTarget: 'default',
+    rail: 'paypal',
+    status: 'AWAITING_APPROVAL',
+    paypalOrderId: orderId,
+    ts: new Date().toISOString(),
+    ...extra,
+  });
+
+  beforeAll(async () => {
+    process.env.ECHO_LOG = log;
+    proxy = new ProofGatedProxy({
+      upstream: [process.execPath, path.join(__dirname, 'fixtures/echo-upstream.cjs')],
+      policy,
+      policyId,
+      receipts: store,
+      spend: new SpendTracker(false),
+    });
+    await proxy.connect();
+  }, 60_000);
+  afterAll(async () => {
+    await proxy.close();
+    delete process.env.ECHO_LOG;
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('a FAILED order (payee mismatch flagged at create) is never captured', async () => {
+    store.put(receipt('601', 'ORDER-MISMATCH', { status: 'FAILED', error: 'upstream order payee ZZZZZZZZZZZZZ is not the allowlisted ABCDEFGHJKLMN' }));
+    const r = await proxy.call('pay_order', { id: 'ORDER-MISMATCH' });
+    expect(r.isError).toBe(true);
+    expect(textOf(r)).toMatch(/^LEASH refused: order ORDER-MISMATCH is FAILED \(upstream order payee ZZZZZZZZZZZZZ/);
+    expect(calls().filter((c) => c.tool === 'pay_order')).toEqual([]);
+  });
+
+  it('an order the upstream gave no status for (FORWARDED) is never captured', async () => {
+    store.put(receipt('602', 'ORDER-NOSTATUS', { status: 'FORWARDED' }));
+    const r = await proxy.call('pay_order', { id: 'ORDER-NOSTATUS' });
+    expect(textOf(r)).toMatch(/^LEASH refused: order ORDER-NOSTATUS is FORWARDED; only an order awaiting approval can be captured/);
+    expect(calls().filter((c) => c.tool === 'pay_order')).toEqual([]);
+  });
+
+  it('an awaiting order whose payee was never reported is checked with get_order first, and refused when PayPal names no payee', async () => {
+    store.put(receipt('603', 'ORDER-NOPAYEE', { status: 'AWAITING_APPROVAL' }));
+    const r = await proxy.call('pay_order', { id: 'ORDER-NOPAYEE' });
+    expect(r.isError).toBe(true);
+    expect(textOf(r)).toMatch(/payee\.merchant_id, so the payee is unverified; not capturing/);
+    const c = calls();
+    expect(c.filter((x) => x.tool === 'get_order').map((x) => x.received)).toEqual([{ id: 'ORDER-NOPAYEE' }]); // read-only check
+    expect(c.filter((x) => x.tool === 'pay_order')).toEqual([]);
   });
 });

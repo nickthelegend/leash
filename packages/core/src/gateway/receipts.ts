@@ -30,6 +30,11 @@ export interface Receipt {
   /** keccak256(abi.encode(policyId, nonce)), sent to PayPal as purchase_units[0].custom_id */
   custom_id?: string;
   approveUrl?: string;
+  /**
+   * leash-mcp proxy only: true once PayPal reported purchase_units[0].payee.merchant_id equal to the
+   * allowlisted merchant (in the create_order or a get_order response). pay_order is refused until then.
+   */
+  payeeVerified?: boolean;
   txHash?: string;
   error?: string;
   ts: string;
