@@ -12,7 +12,10 @@
  *                 receipt. No valid proof, no upstream call.
  *   pay_order     only for an order this proxy created from a verified proof; the capture must come
  *                 back COMPLETED for exactly the proven cents.
- * Every other upstream tool passes through unchanged.
+ * Default-deny for everything else: only read-only tools (get_*, list_*, show_*) pass through unchanged.
+ * Every other upstream tool (under `--tools=all` that includes create_refund, create_subscription,
+ * send_invoice, accept_dispute_claim, …) is hidden from tools/list and refused with "LEASH refused:
+ * <tool> moves money and is not proof-gated"; nothing is forwarded.
  *
  * @paypal/mcp's create_order schema has no custom_id field (it takes items, currencyCode, notes, …),
  * so when the upstream tool has no `custom_id` property the binding goes into `notes` as
@@ -41,6 +44,15 @@ type UpstreamTool = { name: string; description?: string; inputSchema: { type: '
 
 export const GATED_CREATE = new Set(['create_order']);
 export const GATED_CAPTURE = new Set(['pay_order']);
+/** Read-only upstream tools that pass through with no proof (default-deny for everything else). */
+export const READ_ONLY = /^(get|list|show)_[a-z0-9_]+$/;
+
+/** How the proxy treats an upstream tool: proof-gated, read-only passthrough, or hidden and refused. */
+export function toolPolicy(name: string): 'create' | 'capture' | 'read' | 'deny' {
+  if (GATED_CREATE.has(name)) return 'create';
+  if (GATED_CAPTURE.has(name)) return 'capture';
+  return READ_ONLY.test(name) ? 'read' : 'deny';
+}
 
 const refuse = (msg: string): ToolResult => ({ content: [{ type: 'text', text: `LEASH refused: ${msg}` }], isError: true });
 const text = (v: unknown): ToolResult => ({ content: [{ type: 'text', text: JSON.stringify(v, null, 2) }] });
@@ -118,9 +130,9 @@ export class ProofGatedProxy {
     await this.client.close();
   }
 
-  /** Upstream tools, same names; gated create tools also require nonce + merchant. */
+  /** Upstream tools, same names; gated create tools also require nonce + merchant. Denied tools are hidden. */
   listTools(): UpstreamTool[] {
-    return this.tools.map((t) => {
+    return this.tools.filter((t) => toolPolicy(t.name) !== 'deny').map((t) => {
       if (!GATED_CREATE.has(t.name)) {
         return GATED_CAPTURE.has(t.name)
           ? { ...t, description: `${t.description ?? ''} [LEASH: only for orders created from a verified proof]`.trim() }
@@ -145,9 +157,16 @@ export class ProofGatedProxy {
   async call(name: string, args: Record<string, any>): Promise<ToolResult> {
     const tool = this.tools.find((t) => t.name === name);
     if (!tool) return refuse(`unknown tool ${name}`);
-    if (GATED_CREATE.has(name)) return this.gatedCreate(tool, args);
-    if (GATED_CAPTURE.has(name)) return this.gatedCapture(args);
-    return (await this.client.callTool({ name, arguments: args })) as ToolResult;
+    switch (toolPolicy(name)) {
+      case 'create':
+        return this.gatedCreate(tool, args);
+      case 'capture':
+        return this.gatedCapture(args);
+      case 'read':
+        return (await this.client.callTool({ name, arguments: args })) as ToolResult;
+      default:
+        return refuse(`${name} moves money and is not proof-gated`);
+    }
   }
 
   private async gatedCreate(tool: UpstreamTool, args: Record<string, any>): Promise<ToolResult> {

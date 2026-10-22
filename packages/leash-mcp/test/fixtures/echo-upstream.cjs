@@ -20,6 +20,8 @@ const tools = [
   },
   { name: 'pay_order', description: 'echo fixture', inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] } },
   { name: 'get_info', description: 'echo fixture (not gated)', inputSchema: { type: 'object', properties: {} } },
+  // A money-moving tool the toolkit exposes under --tools=all; the proxy must neither list nor forward it.
+  { name: 'create_refund', description: 'echo fixture (money-moving, not proof-gated)', inputSchema: { type: 'object' } },
 ];
 
 let n = 0;

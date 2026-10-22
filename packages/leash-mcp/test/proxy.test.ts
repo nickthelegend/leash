@@ -5,7 +5,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { keccak256Hex, ReceiptStore } from '@leash/core';
-import { orderTotalCents, splitCommand } from '../src/proxy.js';
+import { orderTotalCents, splitCommand, toolPolicy } from '../src/proxy.js';
 
 // End to end over stdio: MCP client -> leash-mcp --upstream (real nargo + bb proofs) -> echo fixture.
 const ROOT = path.resolve(__dirname, '../../..');
@@ -46,6 +46,14 @@ describe('helpers', () => {
     expect(orderTotalCents({ currencyCode: 'EUR', items: item(3) })).toMatch(/not USD/);
     expect(orderTotalCents({ currencyCode: 'USD' })).toMatch(/needs items/);
   });
+  it('default-deny: only create_order / pay_order (gated) and get_* / list_* / show_* (read-only) are allowed', () => {
+    expect(toolPolicy('create_order')).toBe('create');
+    expect(toolPolicy('pay_order')).toBe('capture');
+    for (const t of ['get_order', 'list_transactions', 'show_product_details']) expect(toolPolicy(t)).toBe('read');
+    for (const t of ['create_refund', 'create_subscription', 'send_invoice', 'accept_dispute_claim', 'cancel_subscription', 'update_subscription']) {
+      expect(toolPolicy(t)).toBe('deny');
+    }
+  });
   it('splits the upstream command', () => {
     expect(splitCommand('npx -y @paypal/mcp --tools=all')).toEqual(['npx', '-y', '@paypal/mcp', '--tools=all']);
     expect(splitCommand(`node "/a b/x.cjs"`)).toEqual(['node', '/a b/x.cjs']);
@@ -60,10 +68,20 @@ describe('leash-mcp --upstream (proof-gated proxy)', () => {
     expect(create.inputSchema.required).toEqual(expect.arrayContaining(['currencyCode', 'items', 'nonce', 'merchant']));
   });
 
-  it('passes ungated tools straight through', async () => {
+  it('passes read-only tools straight through', async () => {
     const r: any = await client.callTool({ name: 'get_info', arguments: {} });
     expect(r.isError).toBeFalsy();
     expect(forwarded().at(-1).tool).toBe('get_info');
+  });
+
+  it('hides and refuses a money-moving upstream tool that is not proof-gated (create_refund); nothing is forwarded', async () => {
+    const { tools } = await client.listTools();
+    expect(tools.map((t) => t.name)).not.toContain('create_refund');
+    const before = forwarded().length;
+    const r: any = await client.callTool({ name: 'create_refund', arguments: { capture_id: '2GG279541U471931P', amount: { value: '3.00', currency_code: 'USD' } } });
+    expect(r.isError).toBe(true);
+    expect(textOf(r)).toBe('LEASH refused: create_refund moves money and is not proof-gated');
+    expect(forwarded().length).toBe(before);
   });
 
   it('refuses create_order without a nonce and forwards nothing', async () => {

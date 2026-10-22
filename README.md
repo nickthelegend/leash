@@ -119,8 +119,12 @@ the proxy computes the order total from `items`, proves it locally, verifies it,
 `keccak256(public inputs)` upstream (as `custom_id` if the tool has one, otherwise appended to
 `notes`: `@paypal/mcp`'s `create_order` has no `custom_id` field), forwards, and records a receipt.
 `pay_order` is only allowed for orders created that way, and the capture must match the proven
-cents. Without a valid proof nothing is forwarded. Without `PAYPAL_ACCESS_TOKEN` the proxy refuses to
-start with `Setup required (PAYPAL_ACCESS_TOKEN)`.
+cents. Everything else is **default-deny**: only read-only tools (`get_*`, `list_*`, `show_*`, e.g.
+`get_order`) pass through without a proof. Every other upstream tool, which under `--tools=all`
+includes `create_refund`, `create_subscription`, `send_invoice` and `accept_dispute_claim`, is
+hidden from `tools/list` and refused with `LEASH refused: <tool> moves money and is not proof-gated`;
+nothing is forwarded. Without `PAYPAL_ACCESS_TOKEN` the proxy refuses to start with
+`Setup required (PAYPAL_ACCESS_TOKEN)`.
 
 ## Setup
 
