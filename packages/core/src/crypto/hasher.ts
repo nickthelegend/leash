@@ -34,9 +34,16 @@ export function merchantNameToField(merchantName: string): bigint {
 }
 
 /**
- * Parses the structured Circuit Output printed by Noir.
+ * nargo prints field values without leading zero bytes (0x00ea… comes out as 0xea…). Everything else
+ * in LEASH (bb's public_inputs, the gateway, bytes32 on chain) uses 32-byte words, so a commitment or
+ * hash that starts with a zero byte must be padded back to 0x + 64 hex.
  */
-function parsePolicyBundleOutput(output: string): PolicyBundle {
+function field32(hex: string): string {
+  return `0x${hex.slice(2).toLowerCase().padStart(64, '0')}`;
+}
+
+/** Parses the structured circuit output printed by Noir. Exported for tests. */
+export function parsePolicyBundleOutput(output: string): PolicyBundle {
   const match = output.match(/PolicyBundle\s*\{([\s\S]*?)\}/);
   if (!match) {
     throw new Error(`Failed to parse PolicyBundle output from nargo: ${output}`);
@@ -58,13 +65,13 @@ function parsePolicyBundleOutput(output: string): PolicyBundle {
   };
 
   return {
-    merkle_root: rootMatch[1].toLowerCase(),
-    policy_commitment: commitmentMatch[1].toLowerCase(),
-    leaves: parseHexArray('leaves').map((h) => h.toLowerCase()),
-    layer1: parseHexArray('layer1').map((h) => h.toLowerCase()),
-    layer2: parseHexArray('layer2').map((h) => h.toLowerCase()),
-    layer3: parseHexArray('layer3').map((h) => h.toLowerCase()),
-    merchant_hashes: parseHexArray('merchant_hashes').map((h) => h.toLowerCase()),
+    merkle_root: field32(rootMatch[1]),
+    policy_commitment: field32(commitmentMatch[1]),
+    leaves: parseHexArray('leaves').map(field32),
+    layer1: parseHexArray('layer1').map(field32),
+    layer2: parseHexArray('layer2').map(field32),
+    layer3: parseHexArray('layer3').map(field32),
+    merchant_hashes: parseHexArray('merchant_hashes').map(field32),
   };
 }
 
