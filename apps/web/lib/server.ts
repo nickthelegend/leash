@@ -63,7 +63,10 @@ export function ownerDeviceOnly(req: NextRequest): NextResponse | null {
 /** JSON body cap for every POST route: a proof body is ~33 KB as hex; nothing here is near 128 KB. */
 export const JSON_BODY_LIMIT = 128 * 1024;
 
-type BodyResult = { body: Record<string, unknown>; response?: undefined } | { body?: undefined; response: NextResponse };
+/** A parsed JSON object body; each route checks the fields it uses. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type JsonBody = Record<string, any>;
+type BodyResult = { body: JsonBody; response?: undefined } | { body?: undefined; response: NextResponse };
 
 /**
  * Guarded JSON body for the POST routes (App Router handlers have no body limit of their own):
@@ -104,7 +107,7 @@ export async function readJsonBody(req: NextRequest, limit: number = JSON_BODY_L
     return refuse(400, 'Request body is not valid JSON.');
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return refuse(400, 'Request body must be a JSON object.');
-  return { body: parsed as Record<string, unknown> };
+  return { body: parsed as JsonBody };
 }
 
 /** Address that owns the console's policies (defaults to Anvil dev account #0). */

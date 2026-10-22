@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
   try {
     const read = await readJsonBody(req);
     if (read.response) return read.response;
-    const body = read.body as Record<string, any>;
+    const body = read.body;
     const { policy, merchantName, amountCents, nonce, useEvmTarget, recipient, spend } = body;
 
     // The console sends the policy it committed. There is no fallback to the owner's stored policy:

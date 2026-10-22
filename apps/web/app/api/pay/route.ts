@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
   try {
     const read = await readJsonBody(req);
     if (read.response) return read.response;
-    const { owner, proofHex, publicInputsHex, paypalMerchantId } = read.body as Record<string, any>;
+    const { owner, proofHex, publicInputsHex, paypalMerchantId } = read.body;
     const base = publicBaseUrl(req);
     const receipt = await sharedGateway().pay({
       owner,

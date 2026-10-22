@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
   try {
     const read = await readJsonBody(req);
     if (read.response) return read.response;
-    const body = read.body as Record<string, any>;
+    const body = read.body;
     // The console stores a vault id and threshold only for its own owner's policies; any other owner
     // changes them through the gateway's owner-signed (EIP-191) POST /api/policies.
     if (body.action === 'confirm' && String(body.owner ?? '').toLowerCase() !== consoleOwner().toLowerCase()) {

@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
   try {
     const read = await readJsonBody(req);
     if (read.response) return read.response;
-    const { name, maxPerTxCents, dailyCapCents, merchants, approvalThresholdCents } = read.body as Record<string, any>;
+    const { name, maxPerTxCents, dailyCapCents, merchants, approvalThresholdCents } = read.body;
     if (!name || !maxPerTxCents || !merchants) {
       return NextResponse.json({ error: 'Missing required fields: name, maxPerTxCents, merchants' }, { status: 400 });
     }

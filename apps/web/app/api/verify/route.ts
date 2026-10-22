@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
   try {
     const read = await readJsonBody(req);
     if (read.response) return read.response;
-    const body = read.body as Record<string, any>;
+    const body = read.body;
     const {
       proofHex,
       publicInputsHex,
