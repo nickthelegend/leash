@@ -80,9 +80,11 @@ Express, Next.js 15, Model Context Protocol SDK, PayPal Orders v2 + Vault v3.
   19 `@leash/mcp`. Browser E2E in Google Chrome against the real local stack: 67 passing (chain 10,
   desktop 32, mobile 22, paypal-merchant 2, demo 1). See [TESTING.md](TESTING.md). Web lint + build
   pass and are CI jobs; GitHub has not run CI on these commits yet.
-- LLM-in-the-loop matrix (2026-10-21, 3 of 9 cases, free tier): released $3.00; injected $500.00
-  refused by the per-payment cap; injected payee swap refused by the circuit. 6 cases pending.
-  `docs/evidence/llm-matrix-2026-10-21.json`.
+- LLM-in-the-loop matrix: one 3-case run (cases 21, 1, 25 on commit 575c7bf, 2026-10-21, free
+  tier), 3/3 passed: released $3.00; injected $500.00 refused by the per-payment cap; injected payee
+  swap refused by the circuit. `docs/evidence/llm-matrix-2026-10-21.json` (`casesRequested: [21, 1,
+  25]`, `pending: []`). The other 6 cases of the 9-case default subset (22, 23, 24, 6, 19, 26) have not
+  been run.
 - Verifier: `contracts/src/LeashVerifier.sol`, EVM vk_hash
   `0x0293ccf79f5bbab5e8f19404833acd3025767d0bf162587ade1936f55e0242c1`.
 - Demo: 136-second live Anvil recording, 2026-10-21 (README "Demo video"); timed script in
