@@ -207,7 +207,10 @@ instead of locking the policy until UTC midnight.
 
 ## Demo video
 
-A 136-second live recording (`leash-demo-v4.mp4`, 2026-10-21, shared separately until it is hosted)
+A 136-second live recording (`leash-demo-v4.mp4`, 2026-10-21). **It is not hosted publicly yet**, so
+judges can't watch it from this README; the link goes here once it is on YouTube. It is Anvil only and
+shows the PayPal rail as `Setup required`; [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) is the 2:00 target
+for the PayPal-first re-record. The recording is
 of `scripts/demo-anvil.sh` plus a real LLM agent (opencode + OpenRouter `minimax-m3.1-flash:free`)
 whose only tools are leash-mcp's. Local Anvil; policy owned and funded by Anvil #0 (2000 wei escrow,
 cap 500 cents per payment, 700 per day); payments relayed by Anvil #9 with no value:

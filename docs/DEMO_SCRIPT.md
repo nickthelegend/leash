@@ -1,4 +1,12 @@
-# LEASH demo script (2 minutes)
+# LEASH demo script: target for the PayPal-first re-record (2:00)
+
+This is the **target** timing for the next recording, not a description of an existing cut. The
+recording that exists today (`leash-demo-v4.mp4`, 2026-10-21) is **136 s** long, Anvil only, and runs
+the same on-chain beats (policy set, 300-cent release, R2, payee swap, daily cap, replay,
+SumcheckFailed) at its own pace; it shows the PayPal rail only as `Setup required`. The re-record
+waits for a real sandbox order (BLOCKED on `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`,
+`PAYPAL_PAYEE_MERCHANT_ID` and a sandbox personal buyer login) and must stay under 3:00 with the
+PayPal capture visible in the first minute.
 
 Timed script for the submission video. Rules for the recording: every line on screen is real program
 output except lines starting with `###`, which are captions printed by the recording script. Never

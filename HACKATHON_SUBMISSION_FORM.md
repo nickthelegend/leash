@@ -87,8 +87,9 @@ Express, Next.js 15, Model Context Protocol SDK, PayPal Orders v2 + Vault v3.
   been run.
 - Verifier: `contracts/src/LeashVerifier.sol`, EVM vk_hash
   `0x0293ccf79f5bbab5e8f19404833acd3025767d0bf162587ade1936f55e0242c1`.
-- Demo: 136-second live Anvil recording, 2026-10-21 (README "Demo video"); timed script in
-  [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md). A PayPal-first re-recording follows once sandbox keys exist.
+- Demo: 136-second live Anvil recording, 2026-10-21 (README "Demo video"), not hosted publicly yet.
+  [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) is the 2:00 target script for the PayPal-first re-recording,
+  which follows once sandbox keys exist.
 - No public testnet deployment: the EVM leg is a local settlement stand-in (1 cent = 1 wei). A
   deployment needs a funded testnet key; no captcha-free, account-free faucet worked (2026-10-21).
 
