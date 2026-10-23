@@ -38,7 +38,9 @@ if (!relative(root, out).startsWith('..')) fail(`refusing to write ${out}: pick 
 const gateway = arg('gateway', 'https://leash-api.201-18-198-162.sslip.io').replace(/\/+$/, '');
 if (!/^https:\/\/[A-Za-z0-9.-]+(:\d+)?$/.test(gateway)) fail(`--gateway must be an https origin, got ${gateway}`);
 
-// 1. Stage apps/web without the API routes and the server-only module.
+// 1. Stage apps/web without the API routes and the server-only module. --out is emptied first, so a
+// failed build never leaves an older export behind to be deployed by mistake.
+rmSync(out, { recursive: true, force: true });
 rmSync(stage, { recursive: true, force: true });
 mkdirSync(stage, { recursive: true });
 cpSync(join(web, 'app'), join(stage, 'app'), { recursive: true, filter: (s) => relative(join(web, 'app'), s).split(/[\\/]/)[0] !== 'api' });
