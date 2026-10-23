@@ -1,5 +1,5 @@
 import dotenv from 'dotenv';
-import express, { Express, Request, Response } from 'express';
+import express, { Express, NextFunction, Request, Response } from 'express';
 import path from 'path';
 import { paypalService } from '../paypal/paypal.js';
 import { applyCors, createVerifierRouter, JSON_LIMIT } from '../verifier/service.js';
@@ -26,6 +26,7 @@ dotenv.config();
  */
 export function createGatewayApp(gateway: PayGateway = sharedGateway()): Express {
   const app = express();
+  app.disable('x-powered-by');
   applyCors(app); // none unless LEASH_GATEWAY_CORS_ORIGINS lists origins
   app.use(express.json({ limit: JSON_LIMIT }));
   app.use(createVerifierRouter());
@@ -90,6 +91,19 @@ export function createGatewayApp(gateway: PayGateway = sharedGateway()): Express
       return;
     }
     res.json(hits.length === 1 ? { receipt: hits[0] } : { receipts: hits });
+  });
+
+  // Every answer is JSON, including the ones Express would render as an HTML page.
+  app.use((req: Request, res: Response) => {
+    res.status(404).json({ success: false, error: `No route for ${req.method} ${req.path}` });
+  });
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  app.use((err: { type?: string; status?: number }, _req: Request, res: Response, _next: NextFunction) => {
+    if (err?.type === 'entity.parse.failed') return void res.status(400).json({ success: false, error: 'Body is not valid JSON' });
+    if (err?.type === 'entity.too.large') return void res.status(413).json({ success: false, error: `Body too large (limit ${JSON_LIMIT})` });
+    if (err?.status && err.status >= 400 && err.status < 500) return void res.status(err.status).json({ success: false, error: 'Bad request' });
+    console.error('[LEASH Gateway] unhandled error:', err);
+    res.status(500).json({ success: false, error: 'Gateway internal error' });
   });
 
   return app;

@@ -65,6 +65,22 @@ describe('Express gateway surface', () => {
         body: JSON.stringify({ proofHex: '0x' + 'ab'.repeat(300_000), publicInputsHex: '0x00' }),
       });
       expect(res.status).toBe(413);
+      expect(await res.json()).toEqual({ success: false, error: 'Body too large (limit 128kb)' });
+    });
+  });
+
+  it('answers malformed JSON, unknown routes and every response in JSON, without naming the framework', async () => {
+    await withServer(async (base) => {
+      const bad = await fetch(`${base}/api/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: 'not json' });
+      expect(bad.status).toBe(400);
+      expect(bad.headers.get('content-type')).toMatch(/^application\/json/);
+      expect(await bad.json()).toEqual({ success: false, error: 'Body is not valid JSON' });
+      const missing = await fetch(`${base}/api/nope`);
+      expect(missing.status).toBe(404);
+      expect(await missing.json()).toEqual({ success: false, error: 'No route for GET /api/nope' });
+      const health = await fetch(`${base}/api/health`);
+      expect(health.headers.get('x-powered-by')).toBeNull();
+      expect(missing.headers.get('x-powered-by')).toBeNull();
     });
   });
 });
