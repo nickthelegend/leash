@@ -42,7 +42,7 @@ const BLOCKED_AT_LABEL: Record<string, string> = {
   NONE: 'Allowed',
 };
 
-export function PromptInjectionMatrix() {
+export function PromptInjectionMatrix({ unavailable }: { unavailable?: string } = {}) {
   const [isRunning, setIsRunning] = useState(false);
   const [summary, setSummary] = useState<HarnessSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -109,7 +109,7 @@ export function PromptInjectionMatrix() {
         <button
           type="button"
           onClick={runBenchmark}
-          disabled={isRunning}
+          disabled={isRunning || Boolean(unavailable)}
           className="btn btn-accent btn-sm shrink-0 self-start sm:self-auto"
         >
           {isRunning ? (
@@ -120,6 +120,12 @@ export function PromptInjectionMatrix() {
           <span>{isRunning ? 'Running 26 cases…' : summary ? 'Run again' : 'Run the matrix'}</span>
         </button>
       </div>
+
+      {unavailable && (
+        <p role="status" className="mt-5 rounded-2xl bg-sun-soft px-4 py-3 text-[13.5px] text-white/85 break-words">
+          Not run on this page: {unavailable}
+        </p>
+      )}
 
       {error && (
         <div role="alert" className="mt-5 rounded-2xl bg-no-soft px-4 py-3 text-[13.5px] text-no break-words">

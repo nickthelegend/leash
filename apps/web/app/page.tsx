@@ -10,6 +10,8 @@ import { ZKProofIndicator, ZKStatus, ZKProofData } from '@/components/ZKProofInd
 import { AgentCard, AgentConfig } from '@/components/AgentCard';
 import { AuditLogTable, AuditLogItem } from '@/components/AuditLogTable';
 import { PromptInjectionMatrix } from '@/components/PromptInjectionMatrix';
+import { LiveVerify } from '@/components/LiveVerify';
+import { VERIFY_ONLY, OWNER_DEVICE_ONLY, SetupError, isSetupError } from '@/lib/mode';
 import type { MerchantLeaf, Receipt } from '@leash/core';
 
 /** What the console needs from a committed policy (the full object goes back to the owner-device prover). */
@@ -62,6 +64,7 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [nonceCounter, setNonceCounter] = useState(1001);
   const [owner, setOwner] = useState<string | null>(null);
+  const [ownerLoaded, setOwnerLoaded] = useState(false);
   // Set when the server has PAYPAL_PAYEE_MERCHANT_ID: every committed policy then lists this merchant
   // with its PayPal merchant id, and the console's payments go to it (the PayPal rail).
   const [paypalMerchant, setPaypalMerchant] = useState<string | null>(null);
@@ -112,7 +115,8 @@ export default function Home() {
         setOwner(d.owner ?? null);
         setPaypalMerchant(d.paypalPayeeMerchantId ? PAYPAL_MERCHANT : null);
       })
-      .catch(() => setOwner(null));
+      .catch(() => setOwner(null))
+      .finally(() => setOwnerLoaded(true));
   }, [fetchLogs]);
 
   const capture = useCallback(
@@ -154,6 +158,8 @@ export default function Home() {
   agentsRef.current = agents;
   const [policyError, setPolicyError] = useState<string | null>(null);
   const commitPolicy = useCallback(async (agent: AgentConfig): Promise<CommittedPolicy> => {
+    // The hosted console has no owner device to commit for: say so without a request that can only be refused.
+    if (VERIFY_ONLY) throw new SetupError(OWNER_DEVICE_ONLY);
     const seq = (commitSeqRef.current[agent.id] ?? 0) + 1;
     commitSeqRef.current[agent.id] = seq;
     const res = await fetch('/api/policies', {
@@ -169,7 +175,8 @@ export default function Home() {
     });
     const data = await res.json();
     if (!res.ok || !data.policy) {
-      throw new Error(data.error || `Policy commit failed (HTTP ${res.status})`);
+      const message = data.error || `Policy commit failed (HTTP ${res.status})`;
+      throw data.kind === 'setup' ? new SetupError(message) : new Error(message);
     }
     const current = agentsRef.current.find((a) => a.id === agent.id);
     if (commitSeqRef.current[agent.id] === seq && current?.capCents === data.policy.maxPerTxCents) {
@@ -186,7 +193,7 @@ export default function Home() {
   // One commit per agent on load (a ref guard keeps StrictMode's second effect run from doubling it).
   const initialCommitRef = React.useRef(false);
   useEffect(() => {
-    if (initialCommitRef.current) return;
+    if (initialCommitRef.current || VERIFY_ONLY) return;
     initialCommitRef.current = true;
     Promise.all(INITIAL_AGENTS.map(commitPolicy)).catch((e: Error) =>
       setPolicyError(e.message)
@@ -204,6 +211,7 @@ export default function Home() {
     commitSeqRef.current[agentId] = (commitSeqRef.current[agentId] ?? 0) + 1;
     setAgents((prev) => prev.map((a) => (a.id === agentId ? { ...a, capCents: newCapCents, commitmentHash: '' } : a)));
     clearTimeout(capTimersRef.current[agentId]);
+    if (VERIFY_ONLY) return;
     capTimersRef.current[agentId] = setTimeout(() => {
       const agent = agentsRef.current.find((a) => a.id === agentId);
       if (agent) commitPolicy(agent).catch((e: Error) => setPolicyError(e.message));
@@ -356,8 +364,9 @@ export default function Home() {
     } catch (err) {
       setZkStatus('rejected');
       const message = String((err as Error)?.message ?? err);
+      // A refused policy commit or a missing key is configuration, not a snapped tug.
       setZkProofData({
-        setupError: /not configured/i.test(message),
+        setupError: isSetupError(err),
         rejectionReason: message,
       });
     } finally {
@@ -397,21 +406,30 @@ export default function Home() {
         <div className="lz-wrap py-16 sm:py-20">
           <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-5">
             <div>
-              <p className="lz-num !text-sun">06 · Console · owner device</p>
+              <p className="lz-num !text-sun">06 · Console · {VERIFY_ONLY ? 'hosted, verify-only' : 'owner device'}</p>
               <h2 className="lz-h2 !max-w-[22ch]">Put your own agents on a leash.</h2>
-              <p className="mt-4 text-[16px] leading-relaxed text-white/70 max-w-[62ch]">
-                Live, not the recording: each tag below is a policy committed by this server just now. Paying proves
-                with nargo and bb on this machine, then the verify-only gateway decides what is released.
-              </p>
+              {VERIFY_ONLY ? (
+                <p className="mt-4 text-[16px] leading-relaxed text-white/70 max-w-[62ch]">
+                  Hosted and verify-only: nothing is committed or proven on this page, because the policy secrets and
+                  the prover stay on the owner device (leash-mcp, or this console run locally with
+                  LEASH_OWNER_DEVICE=1). What runs live here is the gateway: it bb-verifies a real proof below and
+                  lists its receipts.
+                </p>
+              ) : (
+                <p className="mt-4 text-[16px] leading-relaxed text-white/70 max-w-[62ch]">
+                  Live, not the recording: each tag below is a policy committed by this server just now. Paying proves
+                  with nargo and bb on this machine, then the verify-only gateway decides what is released.
+                </p>
+              )}
             </div>
             <dl className="flex flex-wrap gap-2 text-[13px]">
               <div className="rounded-[10px] bg-cobalt-900 px-3 py-2">
                 <dt className="sr-only">Verifier</dt>
-                <dd className="mono text-white/80">bb verify · local gateway</dd>
+                <dd className="mono text-white/80">bb verify · {VERIFY_ONLY ? 'hosted' : 'local'} gateway</dd>
               </div>
               <div className="rounded-[10px] bg-cobalt-900 px-3 py-2">
                 <dt className="inline text-white/55">owner </dt>
-                <dd className="inline mono text-sun">{owner ? `${owner.slice(0, 6)}…${owner.slice(-4)}` : 'loading…'}</dd>
+                <dd className="inline mono text-sun">{owner ? `${owner.slice(0, 6)}…${owner.slice(-4)}` : !ownerLoaded ? 'loading…' : VERIFY_ONLY ? 'none (verify-only)' : 'not set'}</dd>
               </div>
             </dl>
           </div>
@@ -461,7 +479,7 @@ export default function Home() {
               </p>
             </div>
             <PayPalSetupCard orderId={latestOrder?.paypalOrderId} orderStatus={latestOrder?.paypalStatus}>
-              <SaveForAgentMode />
+              <SaveForAgentMode unavailable={VERIFY_ONLY ? 'Needs the owner device and PayPal sandbox keys (PAYPAL_CLIENT_ID).' : undefined} />
             </PayPalSetupCard>
           </section>
 
@@ -491,6 +509,7 @@ export default function Home() {
                   isLoading={isLoading}
                   activeAgentId={activeAgentId}
                   paypalMerchant={paypalMerchant}
+                  commitNote={VERIFY_ONLY ? 'Not committed on this page: policies are committed on the owner device.' : null}
                 />
               ))}
             </div>
@@ -498,17 +517,28 @@ export default function Home() {
 
           {/* Walk test + lead state */}
           <section id="run" aria-label="Walk test and proof status" className="mt-14 grid gap-4 lg:grid-cols-2 scroll-mt-6">
-            <DemoRunner onRunLegitDemo={runLegitDemo} onRunAttackDemo={runAttackDemo} isRunning={isLoading} merchant={walkMerchant} />
+            {VERIFY_ONLY ? (
+              <LiveVerify
+                onResult={(status, data) => {
+                  setActiveAgentId(null);
+                  setZkStatus(status);
+                  setZkProofData(data);
+                }}
+              />
+            ) : (
+              <DemoRunner onRunLegitDemo={runLegitDemo} onRunAttackDemo={runAttackDemo} isRunning={isLoading} merchant={walkMerchant} />
+            )}
             <ZKProofIndicator
               status={zkStatus}
               proofData={zkProofData}
-              agentName={agents.find((a) => a.id === activeAgentId)?.name}
+              agentName={agents.find((a) => a.id === activeAgentId)?.name ?? (VERIFY_ONLY ? 'Committed fixture proof' : undefined)}
+              idleHint={VERIFY_ONLY ? 'Verify the committed proof on the left. The cap and the merchant stay hidden; only that the payment is inside them is proven.' : undefined}
             />
           </section>
 
           {/* Pull test */}
           <section id="harness" aria-label="Pull test" className="mt-4 scroll-mt-6">
-            <PromptInjectionMatrix />
+            <PromptInjectionMatrix unavailable={VERIFY_ONLY ? OWNER_DEVICE_ONLY : undefined} />
           </section>
 
           {/* Walk log, this console */}

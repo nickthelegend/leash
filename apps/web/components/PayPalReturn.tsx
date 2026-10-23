@@ -191,15 +191,15 @@ export function PayPalReturnBanner({ receipts, targets, owner, onCapture }: Prop
 }
 
 /** Console button: start agent mode (Vault v3 setup token, then PayPal's approve page). */
-export function SaveForAgentMode() {
+export function SaveForAgentMode({ unavailable }: { unavailable?: string } = {}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   return (
     <div className="mt-4">
       <button
         type="button"
-        className="btn btn-line"
-        disabled={busy}
+        className="btn btn-ghost-light"
+        disabled={busy || Boolean(unavailable)}
         onClick={async () => {
           setBusy(true);
           setError(null);
@@ -219,6 +219,7 @@ export function SaveForAgentMode() {
       >
         {busy ? 'Opening PayPal…' : 'Save PayPal for agent mode'}
       </button>
+      {unavailable && <p className="pp-small break-words">{unavailable}</p>}
       {error && (
         <p role="alert" className="pp-small !opacity-100 break-words">
           {error}

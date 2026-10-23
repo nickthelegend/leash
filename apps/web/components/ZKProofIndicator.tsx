@@ -29,12 +29,15 @@ interface ZKProofIndicatorProps {
   status: ZKStatus;
   proofData?: ZKProofData | null;
   agentName?: string;
+  /** What the idle panel suggests doing (the hosted console has no walk test or tags to pay from). */
+  idleHint?: string;
 }
 
 export function ZKProofIndicator({
   status,
   proofData,
   agentName = 'Agent',
+  idleHint,
 }: ZKProofIndicatorProps) {
   const isVerified = status === 'verified';
   const isProving = status === 'proving';
@@ -64,15 +67,17 @@ export function ZKProofIndicator({
     ? 'Paying out: generating the proof…'
     : 'Slack lead: waiting for a payment request';
 
+  // With a release note (not released, or a page that only verifies) there is no release step next.
+  const next = proofData?.releaseNote ? '' : ' The release step runs next.';
   const sub = isVerified
     ? proofData?.durationMs !== undefined
-      ? `bb verified the proof in ${proofData.durationMs}ms. The release step runs next.`
-      : 'bb verified the proof. The release step runs next.'
+      ? `bb verified the proof in ${proofData.durationMs}ms.${next}`
+      : `bb verified the proof.${next}`
     : isRejected
     ? proofData?.rejectionReason || 'The request was refused. No money moved.'
     : isProving
     ? 'Solving the policy commitment, the (merchant, payee) allowlist path, the per-payment cap and the daily cap.'
-    : 'Run the walk test or pay from an agent tag. The cap and the merchant stay hidden; only that the payment is inside them is proven.';
+    : idleHint ?? 'Run the walk test or pay from an agent tag. The cap and the merchant stay hidden; only that the payment is inside them is proven.';
 
   const iconWrap = isVerified
     ? 'bg-ok-soft text-ok'

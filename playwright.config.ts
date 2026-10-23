@@ -28,18 +28,29 @@ export default defineConfig({
     { name: 'chain', testMatch: /anvil-mcp\.spec\.ts/ },
     {
       name: 'desktop',
-      testIgnore: /(anvil-mcp|console-paypal|demo-agent)\.spec\.ts/,
+      testIgnore: /(anvil-mcp|console-paypal|demo-agent|hosted)\.spec\.ts/,
       dependencies: ['chain'],
       use: { viewport: { width: 1280, height: 800 } },
     },
     {
       name: 'mobile',
-      testIgnore: /(anvil-mcp|console-paypal|demo-agent|owner-device|public-routes)\.spec\.ts/,
+      testIgnore: /(anvil-mcp|console-paypal|demo-agent|owner-device|public-routes|hosted)\.spec\.ts/,
       dependencies: ['chain'],
       use: { viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true },
     },
     // pnpm demo:anvil && pnpm demo:agent on its own fresh chain (no LLM, no keys)
     { name: 'demo', testMatch: /demo-agent\.spec\.ts/ },
+    // The hosted verify-only console (scripts/build-vercel.mjs) against the live gateway; no local stack needed.
+    {
+      name: 'hosted-desktop',
+      testMatch: /hosted\.spec\.ts/,
+      use: { baseURL: process.env.LEASH_E2E_HOSTED_URL ?? 'https://leash-console.vercel.app', viewport: { width: 1280, height: 800 } },
+    },
+    {
+      name: 'hosted-mobile',
+      testMatch: /hosted\.spec\.ts/,
+      use: { baseURL: process.env.LEASH_E2E_HOSTED_URL ?? 'https://leash-console.vercel.app', viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true },
+    },
     // A second console with PAYPAL_PAYEE_MERCHANT_ID set (no client id): its payments go to the PayPal merchant.
     {
       name: 'paypal-merchant',

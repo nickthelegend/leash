@@ -29,6 +29,8 @@ interface AgentCardProps {
    * PayPal. Otherwise Pay uses the agent's first allowlisted merchant.
    */
   paypalMerchant?: string | null;
+  /** Shown instead of "Committing on the server…" when this console can't commit (hosted, verify-only). */
+  commitNote?: string | null;
 }
 
 /** An agent's policy as a yellow tag: the commitment engraved, the spool (cap), today's cord, the allowlist. */
@@ -41,6 +43,7 @@ export function AgentCard({
   isLoading = false,
   activeAgentId,
   paypalMerchant,
+  commitNote,
 }: AgentCardProps) {
   const [copied, setCopied] = React.useState(false);
   const isActive = activeAgentId === agent.id;
@@ -95,7 +98,7 @@ export function AgentCard({
           </p>
         ) : (
           <p className="mt-1 text-[13px] text-[#3a4470]" role="status">
-            Committing on the server…
+            {commitNote ?? 'Committing on the server…'}
           </p>
         )}
       </div>
@@ -149,7 +152,7 @@ export function AgentCard({
           type="button"
           onClick={() => onTriggerPayment(agent.id, merchant, legitAmount)}
           disabled={isLoading || !agent.commitmentHash}
-          title={agent.commitmentHash ? undefined : 'Waiting for the policy commitment'}
+          title={agent.commitmentHash ? undefined : commitNote ?? 'Waiting for the policy commitment'}
           className="btn btn-dark btn-sm !px-3 w-full"
         >
           Pay {legitAmount} cents
@@ -158,7 +161,7 @@ export function AgentCard({
           type="button"
           onClick={() => onTriggerPayment(agent.id, merchant, 50000)}
           disabled={isLoading || !agent.commitmentHash}
-          title={agent.commitmentHash ? undefined : 'Waiting for the policy commitment'}
+          title={agent.commitmentHash ? undefined : commitNote ?? 'Waiting for the policy commitment'}
           className="btn btn-line btn-sm !px-3 w-full"
         >
           Tug $500
