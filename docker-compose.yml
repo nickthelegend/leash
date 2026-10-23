@@ -1,0 +1,43 @@
+# Lightweight hackathon-demo deployment on the VPS behind Coolify's Traefik (network "coolify").
+# Redeploy: cd /opt/hk/leash && docker compose up -d --build
+# Verify-only gateway: bb verify against the image's own vk. No Anvil, no EVM keys on the server.
+# PayPal stays "Setup required" until PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET (sandbox) are added to ./.env.
+services:
+  gateway:
+    build: .
+    image: hk-leash:latest
+    restart: unless-stopped
+    mem_limit: 768m
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      PAYPAL_ENVIRONMENT: sandbox
+    volumes:
+      - leash-data:/data
+    networks: [coolify]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.hk-leash-api.rule=Host(`leash-api.201-18-198-162.sslip.io`)
+      - traefik.http.routers.hk-leash-api.entrypoints=https
+      - traefik.http.routers.hk-leash-api.tls=true
+      - traefik.http.routers.hk-leash-api.tls.certresolver=letsencrypt
+      - traefik.http.routers.hk-leash-api.middlewares=hk-leash-cors
+      - traefik.http.services.hk-leash-api.loadbalancer.server.port=3001
+      # CORS for the future Vercel console (LEASH_GATEWAY_CORS_ORIGINS takes exact origins only).
+      - traefik.http.middlewares.hk-leash-cors.headers.accesscontrolalloworiginlistregex=^https://[a-z0-9-]+\.vercel\.app$$
+      - traefik.http.middlewares.hk-leash-cors.headers.accesscontrolallowmethods=GET,POST,OPTIONS
+      - traefik.http.middlewares.hk-leash-cors.headers.accesscontrolallowheaders=Content-Type
+      - traefik.http.middlewares.hk-leash-cors.headers.accesscontrolmaxage=600
+      - traefik.http.middlewares.hk-leash-cors.headers.addvaryheader=true
+volumes:
+  leash-data:
+networks:
+  coolify:
+    external: true
