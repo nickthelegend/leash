@@ -9,7 +9,7 @@ Event requirements and where this entry stands (rules: paypalaihackathon.devpost
 | Requirement | Status |
 |---|---|
 | PayPal developer platform central to the project | Orders v2 + Vault v3 implemented; **no sandbox order yet** (needs keys) |
-| Judges can run it (setup incl. sandbox credentials, or a hosted URL) | `pnpm install && pnpm setup:tools && pnpm test`, then `pnpm demo:anvil && pnpm demo:agent` (no keys, no LLM). For the PayPal step the rules want the entrant's sandbox credentials: a sandbox client ID + secret and a sandbox buyer login go in Devpost's private testing-instructions field. **BLOCKED** until Nick's sandbox app exists. No hosted URL |
+| Judges can run it (setup incl. sandbox credentials, or a hosted URL) | `pnpm install && pnpm setup:tools && pnpm test`, then `pnpm demo:anvil && pnpm demo:agent` (no keys, no LLM). For the PayPal step the rules want the entrant's sandbox credentials: a sandbox client ID + secret and a sandbox buyer login go in Devpost's private testing-instructions field. **BLOCKED** until Nick's sandbox app exists. Hosted URL: https://leash-console.vercel.app, verify-only (its Live verify has the hosted gateway bb-verify the committed 300-cent proof and reject a 1-byte-flipped copy; proving and PayPal need the owner device and keys) |
 | Public repo, OSS license in About | github.com/nickthelegend/leash, MIT (`LICENSE`, which GitHub shows in About) |
 | Video < 3 min, public on YouTube, showing it working end to end | 136 s Anvil recording exists, not on YouTube; a PayPal-first re-recording waits for a sandbox order |
 
@@ -80,8 +80,8 @@ Noir 1.0.0-beta.16, Barretenberg 3.0.1 (UltraHonk), Solidity/Foundry, Anvil, Typ
 Express, Next.js 15, Model Context Protocol SDK, PayPal Orders v2 + Vault v3.
 
 ## Evidence
-- Tests: `pnpm test` 173 passing, 1 skipped (live PayPal): 16 nargo, 48 forge, 90 `@leash/core`,
-  19 `@leash/mcp`. Browser E2E in Google Chrome against the real local stack: 67 passing (chain 10,
+- Tests: `pnpm test` 204 passing, 1 skipped (live PayPal): 16 nargo, 48 forge, 112 `@leash/core`,
+  28 `@leash/mcp` (re-run 2026-10-24). Browser E2E in Google Chrome against the real local stack: 67 passing (chain 10,
   desktop 32, mobile 22, paypal-merchant 2, demo 1). See [TESTING.md](TESTING.md). Web lint + build
   pass and are CI jobs; GitHub has not run CI on these commits yet.
 - LLM-in-the-loop matrix: one 3-case run (cases 21, 1, 25 on commit 575c7bf, 2026-10-21, free

@@ -8,11 +8,12 @@ real UltraHonk proof made by nargo + bb; nothing that touches a circuit, a verif
 |---|---|---|---|
 | Noir circuit | `cd circuits && nargo test` | 16 | 0 |
 | Solidity (`LeashPayment` + bb `HonkVerifier`, real proof fixtures) | `cd contracts && forge test` | 48 | 0 |
-| `@leash/core` (vitest) | `pnpm --filter @leash/core test` | 90 | 1 |
-| `@leash/mcp` (tsc + vitest) | `pnpm --filter @leash/mcp test` | 19 | 0 |
-| **Total** | `pnpm test` | **173** | **1** |
+| `@leash/core` (vitest) | `pnpm --filter @leash/core test` | 112 | 1 |
+| `@leash/mcp` (tsc + vitest) | `pnpm --filter @leash/mcp test` | 28 | 0 |
+| **Total** | `pnpm test` | **204** | **1** |
 | Web console (lint + type check + build) | `pnpm --filter web lint && pnpm --filter web build` | passes | |
 | Browser E2E (Playwright in Google Chrome, real stack) | `e2e/stack.sh start && pnpm test:e2e` | 67 (chain 10, desktop 32, mobile 22, paypal-merchant 2, demo 1) | 0 |
+| Hosted console (Playwright in Google Chrome, against https://leash-console.vercel.app and the live gateway) | `pnpm exec playwright test --project hosted-desktop --project hosted-mobile` | 4 (2 specs × 2 viewports) | 0 |
 
 **Browser E2E.** `e2e/stack.sh start` starts Anvil with LeashPayment and the escrow-funded demo policy
 (`pnpm demo:anvil`), the verify-only gateway and two consoles (`next start`, owner device on): the
@@ -38,6 +39,20 @@ rebuilds the console when it or `@leash/core` changed since the last build.
 - `demo` (1) runs `pnpm demo:anvil && pnpm demo:agent` on its own Anvil (port 8559, killed by PID):
   1 release and the 6 recorded refusals, `verify:receipt` PASS, payee +300 wei; a second run on the
   same chain is refused with a hint.
+
+- `hosted-desktop` / `hosted-mobile` (2 each) run `e2e/hosted.spec.ts` against the hosted verify-only
+  console (`LEASH_E2E_HOSTED_URL` to point at a preview; no local stack): it sends no request that can
+  only be refused (no 4xx/5xx at all), says why the tags, walk test, matrix and vault button don't run
+  there, turning a spool sends no commit, and **Live verify** has the live gateway bb-verify the
+  committed `contracts/test/fixtures/base` proof (300 cents) and reject it with one byte flipped.
+
+On 2026-10-24 the unit counts above were re-run (circuit 16, forge 48, core 112 + 1 skipped, mcp 28),
+the hosted specs passed 4/4 against production, and `chain` + `desktop` + `mobile` gave 79 passed and 3
+failed: the three body-cap cases in `public-routes.spec.ts` (`/api/verify`, `/api/pay`,
+`/api/pay/capture`) hit the 6-minute timeout. The same requests answered 413 / 413 / 415 / 403 at once
+from curl and from a plain Node client against the same running console, so the hang is most likely in the
+test's raw HTTP helper (it ignores an `EPIPE`/`ECONNRESET` and then waits for a response; if the
+console closes the socket first, none comes), not in the routes. Not fixed yet.
 
 Each page fails on console errors, failed same-origin requests or horizontal scroll. A run needs a
 fresh stack (the chain project uses fixed nonces).
