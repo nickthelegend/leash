@@ -335,6 +335,161 @@ body {
   color: #3a4470;
 }
 
+/* ---------- Landing bands: how it works, proof, what's live ---------- */
+.lz-hero-short .lz-wrap {
+  padding-top: 56px;
+  padding-bottom: 88px;
+}
+.lz-steps {
+  list-style: none;
+  margin: 56px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 48px;
+}
+.lz-steps li {
+  border-top: 2px solid var(--deep);
+  padding-top: 20px;
+}
+.lz-steps h3 {
+  margin: 0;
+  font-weight: 600;
+  font-size: 26px;
+  letter-spacing: -0.035em;
+  line-height: 1.15;
+}
+.lz-steps p {
+  margin: 10px 0 0;
+  font-size: 17px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+.lz-big {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 48px;
+  margin: 56px 0 0;
+}
+.lz-big > div {
+  display: flex;
+  flex-direction: column-reverse;
+  justify-content: flex-end;
+}
+.lz-big dd {
+  margin: 0;
+  font-weight: 600;
+  font-size: clamp(64px, 8.4vw, 120px);
+  line-height: 0.92;
+  letter-spacing: -0.06em;
+  color: var(--deep);
+  font-variant-numeric: tabular-nums;
+}
+.lz-big dd small {
+  font-size: 0.45em;
+  letter-spacing: -0.02em;
+}
+.lz-big dt {
+  margin-top: 14px;
+  font: 500 13px/1 var(--mono-font);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.lz-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 52px;
+  font-weight: 600;
+  font-size: 17px;
+  color: var(--deep);
+  text-decoration: none;
+  border-bottom: 3px solid var(--accent);
+  padding-bottom: 3px;
+}
+.lz-more svg {
+  width: 18px;
+  height: 18px;
+}
+.lz-status {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 48px;
+  margin-top: 44px;
+  padding-top: 24px;
+  border-top: 1.5px solid var(--deep);
+}
+.lz-status h3 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-weight: 600;
+  font-size: 21px;
+  letter-spacing: -0.03em;
+}
+.lz-status h3 i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--snap, #c23a26);
+}
+.lz-status h3 i.ok {
+  background: #1d8a52;
+}
+.lz-status p {
+  margin: 10px 0 0;
+  font-size: 17px;
+  line-height: 1.55;
+  color: var(--muted);
+  max-width: 46ch;
+}
+.lz-foot-cta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 32px;
+  padding-top: 72px;
+  padding-bottom: 40px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+.lz-foot-cta h2 {
+  margin: 0;
+  font-weight: 600;
+  font-size: clamp(30px, 3.6vw, 48px);
+  letter-spacing: -0.045em;
+  line-height: 1.05;
+}
+.lz-foot-cta .lz-cta {
+  margin-top: 0;
+}
+@media (max-width: 1024px) {
+  .lz-steps,
+  .lz-status {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 32px;
+  }
+}
+@media (max-width: 640px) {
+  .lz-big {
+    gap: 12px;
+  }
+  .lz-big dd {
+    font-size: 46px;
+  }
+  .lz-big dt {
+    font-size: 11.5px;
+  }
+  .lz-foot-cta {
+    padding-top: 56px;
+  }
+  .lz-foot-cta .lz-cta {
+    margin-top: 16px;
+  }
+}
+
 /* ---------- Dog tags: front / back ---------- */
 .lz-tags {
   display: grid;

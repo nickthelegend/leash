@@ -13,41 +13,131 @@ export function LandingHero() {
     <header className="lz-hero" id="top">
       <div className="lz-wrap lz-hero-grid">
         <div className="lz-hero-copy">
-          <p className="lz-kicker">ZK spending policy for AI agents · PayPal AI Hackathon</p>
+          <p className="lz-kicker">ZK spending policy for AI agents</p>
           <h1 className="lz-h1">A spending leash your agent can&rsquo;t slip.</h1>
           <p className="lz-lead">
-            The owner writes a secret policy: a per-payment cap, a daily cap and which merchants may be paid at
-            which payee. Only its commitment is engraved on the tag. Every payment the agent asks for carries a
-            Noir proof that it is inside the policy, checked before any money moves.
+            Every payment carries a zero-knowledge proof it&rsquo;s inside the owner&rsquo;s secret caps, checked
+            before money moves.
           </p>
           <div className="lz-cta">
             <a className="btn btn-dark" href="#console">
               Open the console <ArrowRight aria-hidden="true" />
             </a>
-            <a className="btn btn-line" href="#walk">
-              Read the walk log <ArrowDown aria-hidden="true" />
+            <a className="btn btn-line" href="#how">
+              How it works <ArrowDown aria-hidden="true" />
             </a>
           </div>
-          <dl className="lz-hero-facts">
-            <div>
-              <dt>Released</dt>
-              <dd>300 cents</dd>
-            </div>
-            <div>
-              <dt>Refused</dt>
-              <dd>6 attempts</dd>
-            </div>
-            <div>
-              <dt>PayPal rail</dt>
-              <dd className="lz-setup">Setup required</dd>
-            </div>
-          </dl>
         </div>
         <div className="lz-hero-art">
           <CollarTag className="lz-collar" />
           <p className="lz-art-note">
             The real commitment from the recorded Anvil run, {RUN.date}.
           </p>
+        </div>
+      </div>
+    </header>
+  );
+}
+
+const STEPS: Array<[string, string]> = [
+  ['Write the policy', 'Caps and allowed payees stay on the owner’s device. Only a commitment goes on the tag.'],
+  ['Prove each payment', 'The agent’s request carries a Noir proof that it fits inside the policy.'],
+  ['Release or snap', 'The verifier releases the escrowed payment, or refuses it before anything moves.'],
+];
+
+/** The landing below the hero: how it works, proof, and what is live. Everything else is on /evidence. */
+export function LandingBands() {
+  return (
+    <>
+      <section className="lz-sec lz-paper" id="how" aria-labelledby="how-h">
+        <div className="lz-wrap">
+          <h2 className="lz-h2" id="how-h">
+            Three steps between an agent and your money.
+          </h2>
+          <ol className="lz-steps">
+            {STEPS.map(([title, body], i) => (
+              <li key={title}>
+                <span className="lz-num">0{i + 1}</span>
+                <h3>{title}</h3>
+                <p>{body}</p>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </section>
+      <section className="lz-sec lz-cream" id="proof" aria-labelledby="proof-h">
+        <div className="lz-wrap">
+          <h2 className="lz-h2" id="proof-h">
+            One payment released. Every tug refused.
+          </h2>
+          <p className="lz-sub">The recorded Anvil run, {RUN.date}: an agent with only the leash-mcp tools.</p>
+          <dl className="lz-big">
+            <div>
+              <dd>
+                {RUN.release.amountCents}
+                <small>¢</small>
+              </dd>
+              <dt>Released</dt>
+            </div>
+            <div>
+              <dd>6</dd>
+              <dt>Refused</dt>
+            </div>
+            <div>
+              <dd>229</dd>
+              <dt>Tests</dt>
+            </div>
+          </dl>
+          <a className="lz-more" href="/evidence">
+            See the evidence <ArrowRight aria-hidden="true" />
+          </a>
+        </div>
+      </section>
+      <section className="lz-sec lz-paper" id="live" aria-labelledby="live-h">
+        <div className="lz-wrap">
+          <h2 className="lz-h2" id="live-h">
+            What&rsquo;s live today
+          </h2>
+          <div className="lz-status">
+            <div>
+              <h3>
+                <i className="ok" aria-hidden="true" />
+                Live
+              </h3>
+              <p>Proof verification on the hosted gateway: try Live verify in the console below.</p>
+            </div>
+            <div>
+              <h3>
+                <i aria-hidden="true" />
+                Setup required
+              </h3>
+              <p>
+                PayPal sandbox orders need <code className="mono">PAYPAL_CLIENT_ID</code> and{' '}
+                <code className="mono">PAYPAL_CLIENT_SECRET</code>. The contract path has run on local Anvil only.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </>
+  );
+}
+
+/** The evidence page's header: what moved off the landing, and a way into the walk log. */
+export function EvidenceHero() {
+  return (
+    <header className="lz-hero lz-hero-short" id="top">
+      <div className="lz-wrap">
+        <p className="lz-kicker">Evidence · the recorded Anvil run, {RUN.date}</p>
+        <h1 className="lz-h1">The tag, the lead and every snap.</h1>
+        <div className="lz-cta">
+          <a className="btn btn-dark" href="#walk">
+            Read the walk log <ArrowDown aria-hidden="true" />
+          </a>
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- a full load starts the console fresh */}
+          <a className="btn btn-line" href="/#console">
+            Open the console <ArrowRight aria-hidden="true" />
+          </a>
         </div>
       </div>
     </header>
@@ -427,7 +517,8 @@ pnpm paypal:e2e   # sandbox keys`}</pre>
   );
 }
 
-export function LandingSections() {
+/** Tag, lead, snaps, walk log, PayPal rail and fine print: served at /evidence. */
+export function EvidenceSections() {
   return (
     <>
       <TagSection />
@@ -439,18 +530,42 @@ export function LandingSections() {
   );
 }
 
-export function SiteFooter() {
+export function SiteFooter({ page = 'landing' }: { page?: 'landing' | 'evidence' }) {
+  const links: Array<[string, string]> =
+    page === 'evidence'
+      ? [
+          ['Tag', '#tag'],
+          ['Lead', '#lead'],
+          ['Snaps', '#snaps'],
+          ['Walk log', '#walk'],
+          ['Console', '/#console'],
+        ]
+      : [
+          ['How it works', '#how'],
+          ['Proof', '#proof'],
+          ['What’s live', '#live'],
+          ['Console', '#console'],
+          ['Evidence', '/evidence'],
+        ];
   return (
     <footer className="lz-foot">
       <div className="lz-strap" aria-hidden="true" />
+      <div className="lz-wrap lz-foot-cta">
+        <h2>Put your agent on a leash.</h2>
+        <div className="lz-cta">
+          <a className="btn btn-accent" href={REPO_URL} target="_blank" rel="noreferrer">
+            Get the code <ArrowRight aria-hidden="true" />
+          </a>
+        </div>
+      </div>
       <div className="lz-wrap lz-foot-row">
         <LeashLogo tone="accent" className="text-white" />
         <nav aria-label="Footer">
-          <a href="#tag">Tag</a>
-          <a href="#lead">Lead</a>
-          <a href="#snaps">Snaps</a>
-          <a href="#walk">Walk log</a>
-          <a href="#console">Console</a>
+          {links.map(([label, href]) => (
+            <a key={href} href={href}>
+              {label}
+            </a>
+          ))}
           <a href={REPO_URL} target="_blank" rel="noreferrer">
             GitHub
           </a>

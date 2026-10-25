@@ -82,6 +82,8 @@ writeFileSync(join(out, 'vercel.json'), JSON.stringify({
     { src: '/api/(.*)', dest: `${gateway}/api/$1` },
     { src: '/fixtures/base/(proof|public_inputs)', headers: { 'content-type': 'application/octet-stream' }, continue: true },
     { handle: 'filesystem' },
+    // The static export writes /evidence as evidence.html; the landing links /evidence.
+    { src: '/evidence/?', dest: '/evidence.html' },
   ],
 }, null, 2));
 console.log(`build-vercel: ${out} (${readdirSync(out).length} entries), /api/* -> ${gateway}`);

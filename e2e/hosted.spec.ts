@@ -11,7 +11,7 @@ test.describe('hosted verify-only console', () => {
   test('nothing is committed or proven here, and the page says so without a refused request', async ({ page, guard }) => {
     await page.goto('/#console');
     const console_ = page.locator('#console');
-    await expect(console_.getByText('06 · Console · hosted, verify-only')).toBeVisible();
+    await expect(console_.getByText('Console · hosted, verify-only', { exact: true })).toBeVisible();
     await expect(console_.getByText(/Hosted and verify-only: nothing is committed or proven on this page/)).toBeVisible();
     await expect(console_.getByText('none (verify-only)')).toBeVisible();
     await expect(console_.getByText('Not committed on this page: policies are committed on the owner device.')).toHaveCount(3);

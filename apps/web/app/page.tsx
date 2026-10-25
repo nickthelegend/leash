@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { Navbar } from '@/components/Navbar';
-import { LandingHero, LandingSections, SiteFooter } from '@/components/Landing';
+import { LandingHero, LandingBands, SiteFooter } from '@/components/Landing';
 import { PayPalSetupCard } from '@/components/PayPalSetupCard';
 import { PayPalReturnBanner, SaveForAgentMode } from '@/components/PayPalReturn';
 import { DemoRunner } from '@/components/DemoRunner';
@@ -398,7 +398,7 @@ export default function Home() {
     <div className="min-h-screen flex flex-col">
       <Navbar />
       <LandingHero />
-      <LandingSections />
+      <LandingBands />
 
       {/* Console: the owner's device, same metaphor (tags, lead, snaps, walk log) */}
       <main id="console" className="cx scroll-mt-0" aria-label="LEASH console">
@@ -406,7 +406,7 @@ export default function Home() {
         <div className="lz-wrap py-16 sm:py-20">
           <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-5">
             <div>
-              <p className="lz-num !text-sun">06 · Console · {VERIFY_ONLY ? 'hosted, verify-only' : 'owner device'}</p>
+              <p className="lz-num !text-sun">Console · {VERIFY_ONLY ? 'hosted, verify-only' : 'owner device'}</p>
               <h2 className="lz-h2 !max-w-[22ch]">Put your own agents on a leash.</h2>
               {VERIFY_ONLY ? (
                 <p className="mt-4 text-[16px] leading-relaxed text-white/70 max-w-[62ch]">
