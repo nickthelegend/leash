@@ -34,3 +34,6 @@ CLAUDE.md
 # temp dir, and older versions' leftovers must never be committed
 circuits/Prover_*.toml
 packages/core/policy_circuit/Prover_*.toml
+
+# local e2e run scratch (anvil state)
+e2e/.run-ultra/
