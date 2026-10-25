@@ -139,6 +139,10 @@ export function errorResponse(err: unknown): NextResponse {
     const e = err as GatewayError;
     return NextResponse.json({ success: false, error: e.message, ...e.extra }, { status: e.status });
   }
+  // The caller's bad policy request (cap, merchants, payee): 400 with the reason, not a server error.
+  if ((err as { name?: string } | null)?.name === 'PolicyInputError') {
+    return NextResponse.json({ success: false, kind: 'input', error: (err as Error).message }, { status: 400 });
+  }
   return NextResponse.json({ success: false, error: String((err as Error)?.message ?? err) }, { status: 500 });
 }
 

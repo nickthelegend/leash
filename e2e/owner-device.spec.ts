@@ -90,6 +90,41 @@ test.describe('owner-device routes answer only this machine’s console', () => 
     }
   });
 
+  test('a malformed policy: 400 kind "input" with the field named, never 503 "setup" or a TypeError', async () => {
+    const cases: [unknown, RegExp][] = [
+      [{ policyCommitment: policy.policyCommitment }, /^policy is malformed: maxPerTxCents/],
+      [{ ...policy, maxPerTxCents: 'abc' }, /^policy is malformed: maxPerTxCents must be a positive integer/],
+      [{ ...policy, merchantLeaves: undefined }, /^policy is malformed: merchantLeaves must be a list/],
+    ];
+    for (const [bad, error] of cases) {
+      const r = await raw('POST', '/api/prove', { host: new URL(BASE).host, 'content-type': 'application/json' }, proveBody(bad));
+      expect(r.status, JSON.stringify(r.json)).toBe(400);
+      expect(r.json.kind).toBe('input');
+      expect(r.json.error).toMatch(error);
+      expect(r.json.proofHex).toBeUndefined();
+    }
+  });
+
+  test('bad policy fields on create: 400 with the reason (not 500, not "Missing required fields" for a 0 cap)', async () => {
+    const cases: [Record<string, unknown>, RegExp][] = [
+      [{ maxPerTxCents: 0 }, /maxPerTxCents must be a positive integer/],
+      [{ maxPerTxCents: -5 }, /maxPerTxCents must be a positive integer/],
+      [{ maxPerTxCents: 1e18 }, /maxPerTxCents must be a positive integer/],
+      [{ merchants: [] }, /at least one allowlisted merchant/],
+      [{ merchants: 'openai' }, /merchants must be a list/],
+      [{ merchants: ['nosuch'] }, /Merchant 'nosuch' has no payee/],
+      [{ name: '' }, /name must be a non-empty string/],
+      [{ name: 'x'.repeat(81) }, /name must be at most 80 characters/],
+    ];
+    for (const [patch, error] of cases) {
+      const body = JSON.stringify({ name: 'Bad input', maxPerTxCents: 500, merchants: ['openai'], ...patch });
+      const r = await raw('POST', '/api/policies', { host: new URL(BASE).host, 'content-type': 'application/json' }, body);
+      expect(r.status, JSON.stringify(patch)).toBe(400);
+      expect(r.json.success, JSON.stringify(patch)).toBe(false);
+      expect(r.json.error, JSON.stringify(patch)).toMatch(error);
+    }
+  });
+
   test('text/plain body (a cross-site form or no-cors fetch): 415, no proof', async () => {
     const r = await raw('POST', '/api/prove', { host: new URL(BASE).host, 'content-type': 'text/plain' }, proveBody(policy));
     expect(r.status).toBe(415);

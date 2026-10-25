@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { generatePaymentProof, NONCE_RE, PolicyViolation, SpendingPolicy } from '@leash/core';
+import { generatePaymentProof, NONCE_RE, PolicyViolation, policyShapeError, SpendingPolicy } from '@leash/core';
 import { ownerDeviceOnly, readJsonBody } from '@/lib/server';
 
 export const runtime = 'nodejs';
@@ -22,6 +22,10 @@ export async function POST(req: NextRequest) {
         { success: false, kind: 'input', error: 'Missing required parameter: policy (the committed policy to prove against; there is no default)' },
         { status: 400 }
       );
+    }
+    const shape = policyShapeError(policy);
+    if (shape) {
+      return NextResponse.json({ success: false, kind: 'input', error: `policy is malformed: ${shape}` }, { status: 400 });
     }
     const activePolicy = policy as SpendingPolicy;
 

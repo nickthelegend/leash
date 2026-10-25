@@ -27,16 +27,26 @@ export async function POST(req: NextRequest) {
     const read = await readJsonBody(req);
     if (read.response) return read.response;
     const { name, maxPerTxCents, dailyCapCents, merchants, approvalThresholdCents } = read.body;
-    if (!name || !maxPerTxCents || !merchants) {
-      return NextResponse.json({ error: 'Missing required fields: name, maxPerTxCents, merchants' }, { status: 400 });
+    if (name === undefined || maxPerTxCents === undefined || merchants === undefined) {
+      return NextResponse.json({ success: false, error: 'Missing required fields: name, maxPerTxCents, merchants' }, { status: 400 });
     }
+    if (typeof name !== 'string' || !name.trim()) {
+      return NextResponse.json({ success: false, error: 'name must be a non-empty string' }, { status: 400 });
+    }
+    if (name.length > 80) {
+      return NextResponse.json({ success: false, error: 'name must be at most 80 characters' }, { status: 400 });
+    }
+    if (!Array.isArray(merchants)) {
+      return NextResponse.json({ success: false, error: 'merchants must be a list of merchant names or { name, payee } entries.' }, { status: 400 });
+    }
+    // Caps go to createSpendingPolicy as sent: it refuses anything but a positive safe integer (PolicyInputError -> 400).
     const list = [...merchants];
     const pp = process.env.PAYPAL_PAYEE_MERCHANT_ID;
     if (pp) list.push({ name: 'paypal-sandbox-merchant', paypalMerchantId: pp });
     const policy = createSpendingPolicy({
       name,
-      maxPerTxCents: Number(maxPerTxCents),
-      dailyCapCents: dailyCapCents ? Number(dailyCapCents) : undefined,
+      maxPerTxCents,
+      dailyCapCents: dailyCapCents ?? undefined,
       merchants: list,
     });
     // In-process on the owner device (this route is owner-device only), so no network signature.
