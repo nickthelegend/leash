@@ -83,4 +83,39 @@ describe('Express gateway surface', () => {
       expect(missing.headers.get('x-powered-by')).toBeNull();
     });
   });
+
+  it('valid JSON that is not an object (null, a string) is named as such, not as invalid JSON', async () => {
+    await withServer(async (base) => {
+      for (const body of ['null', '"x"', '42']) {
+        const r = await fetch(`${base}/api/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+        expect(r.status, body).toBe(400);
+        expect(await r.json(), body).toEqual({ success: false, error: 'Request body must be a JSON object.' });
+      }
+    });
+  });
+
+  it('a malformed policy id or nonce in a read route is a 400, not an empty 200 or a 404 that echoes it', async () => {
+    await withServer(async (base) => {
+      const cases: [string, RegExp][] = [
+        ['/api/spend/notanid', /^policyId must be 0x \+ 64 hex/],
+        ['/api/spend/0x00', /^policyId must be 0x \+ 64 hex/],
+        ['/api/receipts?policyId=zzz', /^policyId must be 0x \+ 64 hex/],
+        ['/api/receipts/abc', /^nonce must be a decimal integer/],
+        ['/api/receipts/007', /^nonce must be a decimal integer/],
+        [`/api/receipts/1?policyId=0x${'g'.repeat(64)}`, /^policyId must be 0x \+ 64 hex/],
+      ];
+      for (const [url, error] of cases) {
+        const r = await fetch(`${base}${url}`);
+        expect(r.status, url).toBe(400);
+        const j = await r.json();
+        expect(j.success, url).toBe(false);
+        expect(j.error, url).toMatch(error);
+      }
+      // Well-formed but unknown: still the honest empty answers.
+      const id = `0x${'ab'.repeat(32)}`;
+      expect(await (await fetch(`${base}/api/spend/${id}`)).json()).toEqual({ policyId: id, spend: null });
+      expect((await fetch(`${base}/api/receipts/123456`)).status).toBe(404);
+      expect(await (await fetch(`${base}/api/receipts?policyId=${id}`)).json()).toEqual({ receipts: [] });
+    });
+  });
 });

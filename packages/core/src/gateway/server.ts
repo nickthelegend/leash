@@ -5,6 +5,7 @@ import { paypalService } from '../paypal/paypal.js';
 import { applyCors, createVerifierRouter, JSON_LIMIT } from '../verifier/service.js';
 import { policyIdOf } from '../crypto/evm.js';
 import { GatewayError, PayGateway, registrationMessage, sharedGateway } from './payGateway.js';
+import { NONCE_RE } from '../prover/prover.js';
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
 dotenv.config();
@@ -24,6 +25,27 @@ dotenv.config();
  * Payments are released by the Next.js app's /api/pay, which uses the same PayGateway.
  * No CORS headers unless LEASH_GATEWAY_CORS_ORIGINS lists origins; JSON bodies are capped at 128 KB.
  */
+// Read routes take public ids only; a malformed one is the caller's mistake (400), never an empty 200.
+export const POLICY_ID_RE = /^0x[0-9a-fA-F]{64}$/;
+const POLICY_ID_ERROR = 'policyId must be 0x + 64 hex (keccak256(owner, commitment))';
+const NONCE_ERROR = 'nonce must be a decimal integer string without leading zeros (1-30 digits)';
+const badRead = (res: Response, error: string) => res.status(400).json({ success: false, error });
+/** undefined: no ?policyId; false: present but malformed; else the lowercased id. */
+function queryPolicyId(req: Request): string | undefined | false {
+  const q = req.query.policyId;
+  if (q === undefined) return undefined;
+  return typeof q === 'string' && POLICY_ID_RE.test(q) ? q.toLowerCase() : false;
+}
+function parsesAsJson(body: unknown): boolean {
+  if (typeof body !== 'string') return false;
+  try {
+    JSON.parse(body);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function createGatewayApp(gateway: PayGateway = sharedGateway()): Express {
   const app = express();
   app.disable('x-powered-by');
@@ -74,17 +96,22 @@ export function createGatewayApp(gateway: PayGateway = sharedGateway()): Express
   });
 
   app.get('/api/spend/:policyId', (req: Request, res: Response) => {
-    res.json({ policyId: String(req.params.policyId).toLowerCase(), spend: gateway.spendState(String(req.params.policyId)) ?? null });
+    const policyId = String(req.params.policyId);
+    if (!POLICY_ID_RE.test(policyId)) return void badRead(res, POLICY_ID_ERROR);
+    res.json({ policyId: policyId.toLowerCase(), spend: gateway.spendState(policyId) ?? null });
   });
 
   app.get('/api/receipts', (req: Request, res: Response) => {
-    const policyId = typeof req.query.policyId === 'string' ? req.query.policyId.toLowerCase() : undefined;
+    const policyId = queryPolicyId(req);
+    if (policyId === false) return void badRead(res, POLICY_ID_ERROR);
     const all = gateway.receipts.list();
     res.json({ receipts: policyId ? all.filter((r) => r.policyId === policyId) : all });
   });
 
   app.get('/api/receipts/:nonce', (req: Request, res: Response) => {
-    const policyId = typeof req.query.policyId === 'string' ? req.query.policyId.toLowerCase() : undefined;
+    if (!NONCE_RE.test(String(req.params.nonce))) return void badRead(res, NONCE_ERROR);
+    const policyId = queryPolicyId(req);
+    if (policyId === false) return void badRead(res, POLICY_ID_ERROR);
     const hits = gateway.receipts.byNonce(String(req.params.nonce)).filter((r) => !policyId || r.policyId === policyId);
     if (hits.length === 0) {
       res.status(404).json({ error: 'No receipt for that nonce' });
@@ -98,8 +125,11 @@ export function createGatewayApp(gateway: PayGateway = sharedGateway()): Express
     res.status(404).json({ success: false, error: `No route for ${req.method} ${req.path}` });
   });
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  app.use((err: { type?: string; status?: number }, _req: Request, res: Response, _next: NextFunction) => {
-    if (err?.type === 'entity.parse.failed') return void res.status(400).json({ success: false, error: 'Body is not valid JSON' });
+  app.use((err: { type?: string; status?: number; body?: unknown }, _req: Request, res: Response, _next: NextFunction) => {
+    if (err?.type === 'entity.parse.failed') {
+      // express.json is strict: valid JSON that is not an object or array (null, "x", 42) lands here too.
+      return void res.status(400).json({ success: false, error: parsesAsJson(err.body) ? 'Request body must be a JSON object.' : 'Body is not valid JSON' });
+    }
     if (err?.type === 'entity.too.large') return void res.status(413).json({ success: false, error: `Body too large (limit ${JSON_LIMIT})` });
     if (err?.status && err.status >= 400 && err.status < 500) return void res.status(err.status).json({ success: false, error: 'Bad request' });
     console.error('[LEASH Gateway] unhandled error:', err);

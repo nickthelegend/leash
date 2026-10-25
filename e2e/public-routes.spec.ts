@@ -96,6 +96,16 @@ test.describe('public POST routes: body cap, JSON only, no cross-site, exact pro
     expect(JSON.stringify(h)).not.toContain(process.cwd());
   });
 
+  test('read routes: a malformed policy id or nonce is a 400 (not an empty 200 or a 404)', async ({ request }) => {
+    for (const url of ['/api/spend/notanid', '/api/receipts?policyId=zzz', '/api/receipts/abc', '/api/receipts/007']) {
+      const res = await request.get(url);
+      expect(res.status(), url).toBe(400);
+      expect((await res.json()).success, url).toBe(false);
+    }
+    const id = `0x${'ab'.repeat(32)}`;
+    expect(await (await request.get(`/api/spend/${id}`)).json()).toEqual({ policyId: id, spend: null });
+  });
+
   test('/api/pay: 400 for a proof that is not hex of the exact size', async () => {
     const r = await post('/api/pay', JSON_TYPE, JSON.stringify({ owner: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266', proofHex: '00', publicInputsHex: '00'.repeat(256), paypalMerchantId: 'ABCDEFGHJKLMN' }));
     expect(r.status).toBe(400);
