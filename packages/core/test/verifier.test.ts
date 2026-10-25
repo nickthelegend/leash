@@ -170,7 +170,10 @@ describe('LEASH Noir Verifier Service', () => {
       const server = app.listen(0);
       const port = (server.address() as any).port;
       const target = path.resolve(__dirname, '../../../circuits/target');
-      const before = fs.readdirSync(target).filter((f) => f.startsWith('verify_')).length;
+      // Only this worker's temp files: other test files verify in parallel worker processes and use the same
+      // target dir (the verifier names them verify_<time>_<pid>_<rand>), so a count of all of them is racy.
+      const mine = () => fs.readdirSync(target).filter((f) => f.startsWith('verify_') && f.includes(`_${process.pid}_`)).length;
+      const before = mine();
       try {
         const post = (b: unknown) =>
           fetch(`http://localhost:${port}/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
@@ -186,7 +189,7 @@ describe('LEASH Noir Verifier Service', () => {
           expect(res.status, error).toBe(400);
           expect(await res.json()).toEqual({ success: false, valid: false, error });
         }
-        expect(fs.readdirSync(target).filter((f) => f.startsWith('verify_')).length).toBe(before);
+        expect(mine()).toBe(before);
       } finally {
         server.close();
       }

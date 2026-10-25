@@ -36,7 +36,7 @@ describe('circuit rules through the TypeScript prover', () => {
     expect(() =>
       generatePaymentProof({ policy, merchantName: 'openai', amountCents: 1, nonce: '200', spend: spend.inputs(policy.policyCommitment, epoch) })
     ).toThrow(/Amount exceeds daily cap/);
-  });
+  }, 60_000); // four real proofs and three bb verifies: well over vitest's 5 s default on a CI runner
 
   it('refuses a forged spend state (understated spent_before)', () => {
     const epoch = currentEpoch();
