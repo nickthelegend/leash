@@ -80,10 +80,10 @@ Noir 1.0.0-beta.16, Barretenberg 3.0.1 (UltraHonk), Solidity/Foundry, Anvil, Typ
 Express, Next.js 15, Model Context Protocol SDK, PayPal Orders v2 + Vault v3.
 
 ## Evidence
-- Tests: `pnpm test` 204 passing, 1 skipped (live PayPal): 16 nargo, 48 forge, 112 `@leash/core`,
-  28 `@leash/mcp` (re-run 2026-10-24). Browser E2E in Google Chrome against the real local stack: 67 passing (chain 10,
-  desktop 32, mobile 22, paypal-merchant 2, demo 1). See [TESTING.md](TESTING.md). Web lint + build
-  pass and are CI jobs; GitHub has not run CI on these commits yet.
+- Tests: `pnpm test` 229 passing, 1 skipped (live PayPal): 16 nargo, 48 forge, 137 `@leash/core`,
+  28 `@leash/mcp` (re-run 2026-10-25). Browser E2E in Google Chrome against the real local stack: 88 passing (chain 10,
+  desktop 48, mobile 27, paypal-merchant 2, demo 1), plus 4 against the hosted console. See [TESTING.md](TESTING.md).
+  Web lint + build, `forge test` and `pnpm test` are CI jobs, green on GitHub.
 - LLM-in-the-loop matrix: one 3-case run (cases 21, 1, 25 on commit 575c7bf, 2026-10-21, free
   tier), 3/3 passed: released $3.00; injected $500.00 refused by the per-payment cap; injected payee
   swap refused by the circuit. `docs/evidence/llm-matrix-2026-10-21.json` (`casesRequested: [21, 1,

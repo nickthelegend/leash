@@ -1,6 +1,6 @@
 # Testing
 
-Counts from `pnpm run pretest && pnpm test` and `e2e/stack.sh start && pnpm test:e2e` on 2026-10-22
+Counts from `pnpm run pretest && pnpm test` and `e2e/stack.sh start && pnpm test:e2e` on 2026-10-25
 (nargo 1.0.0-beta.16, bb 3.0.1, forge 1.7.1, Node 26, Google Chrome). Every proof in these tests is a
 real UltraHonk proof made by nargo + bb; nothing that touches a circuit, a verifier or a chain is mocked.
 
@@ -8,11 +8,11 @@ real UltraHonk proof made by nargo + bb; nothing that touches a circuit, a verif
 |---|---|---|---|
 | Noir circuit | `cd circuits && nargo test` | 16 | 0 |
 | Solidity (`LeashPayment` + bb `HonkVerifier`, real proof fixtures) | `cd contracts && forge test` | 48 | 0 |
-| `@leash/core` (vitest) | `pnpm --filter @leash/core test` | 112 | 1 |
+| `@leash/core` (vitest) | `pnpm --filter @leash/core test` | 137 | 1 |
 | `@leash/mcp` (tsc + vitest) | `pnpm --filter @leash/mcp test` | 28 | 0 |
-| **Total** | `pnpm test` | **204** | **1** |
+| **Total** | `pnpm test` | **229** | **1** |
 | Web console (lint + type check + build) | `pnpm --filter web lint && pnpm --filter web build` | passes | |
-| Browser E2E (Playwright in Google Chrome, real stack) | `e2e/stack.sh start && pnpm test:e2e` | 67 (chain 10, desktop 32, mobile 22, paypal-merchant 2, demo 1) | 0 |
+| Browser E2E (Playwright in Google Chrome, real stack) | `e2e/stack.sh start && pnpm test:e2e` | 88 (chain 10, desktop 48, mobile 27, paypal-merchant 2, demo 1) | 0 |
 | Hosted console (Playwright in Google Chrome, against https://leash-console.vercel.app and the live gateway) | `pnpm exec playwright test --project hosted-desktop --project hosted-mobile` | 4 (2 specs × 2 viewports) | 0 |
 
 **Browser E2E.** `e2e/stack.sh start` starts Anvil with LeashPayment and the escrow-funded demo policy
@@ -25,14 +25,16 @@ rebuilds the console when it or `@leash/core` changed since the last build.
   (SumcheckFailed), `verify:receipt`, owner-signed (EIP-191) gateway registration, and a proof landed
   directly with `cast` by the relayer followed by a leash-mcp restart: the next proof reconciles
   (`spent_before` 100) instead of being locked out until UTC midnight.
-- `desktop` (32, 1280x800) and `mobile` (22, 375x812) click through the landing and the console in
+- `desktop` (48, 1280x800) and `mobile` (27, 375x812) click through the landing and the console in
   Chrome with video and traces: every nav anchor and every "log" control, the lead animation and
   reduced motion, Pay / Tug / spools / walk test / pull test with real proofs, the walk log and its
-  Refresh, and the PayPal rail's "Setup required". Desktop also runs `owner-device.spec.ts` (10): the
+  Refresh, and the PayPal rail's "Setup required". Desktop also runs `owner-device.spec.ts` (13) and `public-routes.spec.ts` (8): the
   console's bind address, and that the proving routes refuse a LAN / rebinding `Host`, a cross-site
   `Sec-Fetch-Site`, a `text/plain` body, a request without a policy, a hex / zero-padded / injected
   nonce, a real cross-site no-cors POST from another origin in Chrome, a vault change for another owner,
-  and PayPal return links built from a foreign `Host`.
+  PayPal return links built from a foreign `Host`, a malformed policy object or bad cap / merchant list
+  (400 kind input, never 500 or 503), the 128 KB body cap on a reused keep-alive connection, and
+  malformed policy ids and nonces on the read routes (400).
 - `paypal-merchant` (2) runs against the second console: Pay and the walk test pay
   `paypal-sandbox-merchant` and send its PayPal merchant id, and the gateway passes the payee check and
   answers `Setup required (PAYPAL_CLIENT_ID)`.
@@ -46,13 +48,12 @@ rebuilds the console when it or `@leash/core` changed since the last build.
   there, turning a spool sends no commit, and **Live verify** has the live gateway bb-verify the
   committed `contracts/test/fixtures/base` proof (300 cents) and reject it with one byte flipped.
 
-On 2026-10-24 the unit counts above were re-run (circuit 16, forge 48, core 112 + 1 skipped, mcp 28),
-the hosted specs passed 4/4 against production, and `chain` + `desktop` + `mobile` gave 79 passed and 3
-failed: the three body-cap cases in `public-routes.spec.ts` (`/api/verify`, `/api/pay`,
-`/api/pay/capture`) hit the 6-minute timeout. The same requests answered 413 / 413 / 415 / 403 at once
-from curl and from a plain Node client against the same running console, so the hang is most likely in the
-test's raw HTTP helper (it ignores an `EPIPE`/`ECONNRESET` and then waits for a response; if the
-console closes the socket first, none comes), not in the routes. Not fixed yet.
+On 2026-10-25 every count above was re-run on 7e2a79f: circuit 16, forge 48, core 137 + 1 skipped,
+mcp 28; `chain` + `desktop` + `mobile` + `paypal-merchant` + `demo` 88 passed and 0 failed, and the hosted
+specs 4/4 against production (92 in one `pnpm test:e2e`). The three body-cap cases that hung on Oct 24
+were a real console bug, not the test helper: a refused body was left unread on a keep-alive socket, so
+the next request on it never got an answer. Refusals now close the connection (963a25d). GitHub CI
+(forge, web lint + build, full `pnpm test`) is green on 7e2a79f.
 
 Each page fails on console errors, failed same-origin requests or horizontal scroll. A run needs a
 fresh stack (the chain project uses fixed nonces).
@@ -192,8 +193,8 @@ requested only 21, 1 and 25, so the other six default cases are not in it (they 
   refused by the circuit, wrong recipient `SumcheckFailed`; `pnpm verify:receipt 3001` passes all checks.
 - `pnpm --filter web lint` (ESLint: `next/core-web-vitals` + `next/typescript`) and `pnpm --filter web
   build` (compile + type check) pass. Both are jobs in `.github/workflows/ci.yml` next to `forge test`
-  and the full `pnpm test`; GitHub has not run that workflow on these commits yet (they are not pushed,
-  and the only run on GitHub, on 8826bcf, failed before the CI PATH fix). A production `next start` refuses
+  and the full `pnpm test`; the workflow is green on GitHub on 7e2a79f (it was red on ec08602: a racy
+  temp-file count and a 5 s timeout in two core tests, fixed in 7e2a79f). A production `next start` refuses
   `/api/prove` (verify-only). `pnpm paypal:e2e` exits 1 with `Setup required (PAYPAL_CLIENT_ID)` and
   the dashboard checklist.
 - Public testnet: not deployed. A throwaway deployer key was generated in the gitignored `.demo/`.

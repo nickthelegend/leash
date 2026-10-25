@@ -12,7 +12,7 @@ Built for the PayPal AI Hackathon.
 
 | Part | State |
 |---|---|
-| Noir circuit, UltraHonk verifier, `LeashPayment` contract | Done; 16 nargo + 48 forge tests on real proofs (204 unit tests in all plus the browser E2E suites, [TESTING.md](TESTING.md)) |
+| Noir circuit, UltraHonk verifier, `LeashPayment` contract | Done; 16 nargo + 48 forge tests on real proofs (229 unit tests in all plus the browser E2E suites, [TESTING.md](TESTING.md)) |
 | PayPal Orders v2 (create with `custom_id`, buyer approval or Vault v3 `vault_id`, capture checked against the proven cents) | **Implemented, live run pending sandbox keys** (`PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPAL_PAYEE_MERCHANT_ID`). No sandbox order has run yet. |
 | EVM rail | Runs on a local Anvil chain only. It is a **settlement stand-in**: 1 cent settles as 1 wei. |
 | Proof-gated proxy for PayPal's agent toolkit MCP server | Implemented (default-deny) and tested against a local stdio upstream; the live `@paypal/mcp` upstream needs `PAYPAL_ACCESS_TOKEN` (Setup required). |
@@ -284,12 +284,12 @@ leash-mcp's own `LEASH_MCP_LOG` entries (proof bytes shown as a length only). Ti
 
 ## Testing
 
-Real counts and how each layer is tested: [TESTING.md](TESTING.md). `pnpm test`: 204 passing, 1
-skipped (16 nargo, 48 forge, 112 `@leash/core`, 28 `@leash/mcp`, re-run 2026-10-24). Browser E2E (`e2e/stack.sh start &&
-pnpm test:e2e`, Playwright in Google Chrome against the real local stack): 67 passing (chain 10,
-desktop 32, mobile 22, paypal-merchant 2, demo 1). Web lint and build pass locally and are jobs in
-`.github/workflows/ci.yml` with `forge test` and the full `pnpm test`; GitHub has not run them on
-these commits yet (unpushed). No PayPal mocks: PayPal tests are pure request-body/assertion tests,
+Real counts and how each layer is tested: [TESTING.md](TESTING.md). `pnpm test`: 229 passing, 1
+skipped (16 nargo, 48 forge, 137 `@leash/core`, 28 `@leash/mcp`, re-run 2026-10-25). Browser E2E (`e2e/stack.sh start &&
+pnpm test:e2e`, Playwright in Google Chrome against the real local stack): 88 passing (chain 10,
+desktop 48, mobile 27, paypal-merchant 2, demo 1), plus 4 against the hosted console. Web lint and build
+are jobs in `.github/workflows/ci.yml` with `forge test` and the full `pnpm test`; CI is green on
+GitHub. No PayPal mocks: PayPal tests are pure request-body/assertion tests,
 real local failures (a closed port, a server that never answers), and one live sandbox test that is
 skipped with a visible `Setup required (PAYPAL_CLIENT_ID)` until keys exist.
 
