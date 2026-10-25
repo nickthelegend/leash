@@ -3,6 +3,7 @@
 import React from 'react';
 import { CheckCircle2, XCircle, Clock, Shield, RefreshCw, ExternalLink, Hourglass, ArrowUpRight } from 'lucide-react';
 import { truncateHash } from '@/lib/utils';
+import { VERIFY_ONLY } from '@/lib/mode';
 
 export interface AuditLogItem {
   id: string;
@@ -174,9 +175,19 @@ export function AuditLogTable({
             Walk log · this console
           </h2>
           <p className="mt-2 text-[14px] text-white/65 max-w-[62ch]">
-            Receipts from the gateway (PayPal rail) and this device&rsquo;s on-chain releases (leash-mcp on Anvil):
-            policy id, salted merchant hash, nonce, proof hash, PayPal ids or tx hash. This session&rsquo;s refusals
-            are listed too. The private rules never appear here.
+            {VERIFY_ONLY ? (
+              <>
+                Receipts held by the hosted gateway (PayPal rail): policy id, salted merchant hash, nonce, proof hash,
+                PayPal ids. The private rules never appear here. Live verify is a check, not a payment, so it adds no
+                row.
+              </>
+            ) : (
+              <>
+                Receipts from the gateway (PayPal rail) and this device&rsquo;s on-chain releases (leash-mcp on Anvil):
+                policy id, salted merchant hash, nonce, proof hash, PayPal ids or tx hash. This session&rsquo;s refusals
+                are listed too. The private rules never appear here.
+              </>
+            )}
           </p>
           {onRefresh && (
             <p role="status" className="mt-2 mono text-[12.5px] text-white/55">
@@ -214,9 +225,13 @@ export function AuditLogTable({
       {logs.length === 0 ? (
         <div className="mx-5 sm:mx-7 mb-6 rounded-2xl border border-dashed border-white/15 px-5 py-10 text-center">
           <Shield className="mx-auto w-6 h-6 text-white/40" aria-hidden="true" />
-          <p className="mt-3 font-medium">{isLoading ? 'Waiting for the first result…' : 'No settlement records yet'}</p>
+          <p className="mt-3 font-medium">
+            {isLoading ? 'Waiting for the first result…' : VERIFY_ONLY ? 'No receipts on the hosted gateway' : 'No settlement records yet'}
+          </p>
           <p className="mt-1 text-[13.5px] text-white/55">
-            Run the walk test or pay from an agent tag. Every attempt, paid or snapped, lands here.
+            {VERIFY_ONLY
+              ? 'Nothing is paid from this page: proving runs on the owner device, and the PayPal rail is Setup required (PAYPAL_CLIENT_ID).'
+              : 'Run the walk test or pay from an agent tag. Every attempt, paid or snapped, lands here.'}
           </p>
         </div>
       ) : (

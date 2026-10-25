@@ -28,6 +28,11 @@ test.describe('hosted verify-only console', () => {
     await console_.getByRole('button', { name: 'Increase cap by $0.50' }).first().click();
     await page.waitForTimeout(800);
     expect(commits).toEqual([]);
+    // No copy promises what this page can't do: no re-commit, no walk test, no matrix result to wait for.
+    await expect(console_.getByText(/this page commits nothing/)).toBeVisible();
+    await expect(console_.getByText(/the policy is re-committed and the tag gets a new hash\./)).toHaveCount(0);
+    await expect(console_.getByText(/Run the walk test or pay from an agent tag/)).toHaveCount(0);
+    await expect(console_.getByText(/Results appear here once the matrix finishes/)).toHaveCount(0);
     // The receipts come from the live gateway.
     await expect(console_.getByText(/^\d+ receipts? · updated /)).toBeVisible();
     const width = await page.evaluate(() => [document.documentElement.scrollWidth, document.documentElement.clientWidth]);

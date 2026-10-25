@@ -209,7 +209,9 @@ export function PromptInjectionMatrix({ unavailable }: { unavailable?: string } 
             </div>
           </div>
           <p className="mt-3 text-[12.5px] text-white/50">
-            Nothing has run yet. Results appear here once the matrix finishes; nothing is shown before then.
+            {unavailable
+              ? 'Nothing has run on this page. The matrix runs on the owner device, through its prover and verifier.'
+              : 'Nothing has run yet. Results appear here once the matrix finishes; nothing is shown before then.'}
           </p>
         </div>
       )}

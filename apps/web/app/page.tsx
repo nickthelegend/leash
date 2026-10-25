@@ -491,8 +491,18 @@ export default function Home() {
                   Agent tags
                 </h3>
                 <p className="mt-2 text-[14px] text-white/65 max-w-[64ch]">
-                  Turn a spool to change that agent&rsquo;s lead (its per-payment cap); the policy is re-committed and
-                  the tag gets a new hash. The daily cap is three leads long.
+                  {VERIFY_ONLY ? (
+                    <>
+                      Turn a spool to see that agent&rsquo;s lead (its per-payment cap) change. On the owner device the
+                      policy is then re-committed and the tag gets a new hash; this page commits nothing. The daily cap is
+                      three leads long.
+                    </>
+                  ) : (
+                    <>
+                      Turn a spool to change that agent&rsquo;s lead (its per-payment cap); the policy is re-committed and
+                      the tag gets a new hash. The daily cap is three leads long.
+                    </>
+                  )}
                 </p>
               </div>
               <span className="mono text-[13px] text-white/55">{agents.length} example policies</span>
