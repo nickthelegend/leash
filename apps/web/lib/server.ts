@@ -79,7 +79,12 @@ type BodyResult = { body: JsonBody; response?: undefined } | { body?: undefined;
  *  - the body must be a JSON object (400).
  */
 export async function readJsonBody(req: NextRequest, limit: number = JSON_BODY_LIMIT): Promise<BodyResult> {
-  const refuse = (status: number, error: string): BodyResult => ({ response: NextResponse.json({ success: false, error }, { status }) });
+  // A refusal before the whole body is read leaves the rest of it on the socket. Close the connection
+  // with the answer, so a keep-alive client (Node's default agent, a browser) doesn't send its next
+  // request into that unread body and wait forever for a response that never comes.
+  const refuse = (status: number, error: string): BodyResult => ({
+    response: NextResponse.json({ success: false, error }, { status, headers: { connection: 'close' } }),
+  });
   if (req.headers.get('sec-fetch-site') === 'cross-site') return refuse(403, 'Refusing a cross-site request: only this console’s own pages and non-browser clients may call it.');
   const type = (req.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
   if (type !== 'application/json') return refuse(415, `Content-Type must be application/json (got '${type || 'none'}').`);
