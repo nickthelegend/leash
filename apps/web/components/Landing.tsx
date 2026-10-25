@@ -73,19 +73,19 @@ export function LandingBands() {
           <p className="lz-sub">The recorded Anvil run, {RUN.date}: an agent with only the leash-mcp tools.</p>
           <dl className="lz-big">
             <div>
+              <dt>Released</dt>
               <dd>
                 {RUN.release.amountCents}
                 <small>¢</small>
               </dd>
-              <dt>Released</dt>
             </div>
             <div>
-              <dd>6</dd>
               <dt>Refused</dt>
+              <dd>6</dd>
             </div>
             <div>
-              <dd>229</dd>
               <dt>Tests</dt>
+              <dd>229</dd>
             </div>
           </dl>
           <a className="lz-more" href="/evidence">
