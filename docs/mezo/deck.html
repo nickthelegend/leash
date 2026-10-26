@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=1920" />
+<title>LEASH Clawback on Mezo · deck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Source+Code+Pro:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root { --yellow: #ffd400; --cobalt: #1f3fd1; --navy: #0b1530; --ink: #0d1020; --brass: #b8892b; --paper: #fffdf3; --red: #e5372e; --green: #12805c; --muted: #5b5f73; }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: #222; font-family: 'Sora', system-ui, sans-serif; color: var(--ink); }
+  .slide { width: 1920px; height: 1080px; position: relative; overflow: hidden; padding: 110px 140px; display: flex; flex-direction: column; justify-content: center; page-break-after: always; break-after: page; }
+  .y { background: var(--yellow); } .n { background: var(--navy); color: #fff; } .p { background: var(--paper); }
+  .kicker { font: 600 26px/1 'Source Code Pro', monospace; letter-spacing: .02em; color: var(--cobalt); margin-bottom: 34px; }
+  .n .kicker { color: var(--yellow); }
+  h1 { font-weight: 800; font-size: 112px; line-height: .98; letter-spacing: -.045em; max-width: 900px; position: relative; }
+  h2 { font-weight: 800; font-size: 86px; line-height: 1.02; letter-spacing: -.04em; max-width: 1400px; }
+  h1 em, h2 em { font-style: normal; color: var(--cobalt); } .n h2 em { color: var(--yellow); }
+  .sub { font-size: 36px; line-height: 1.4; margin-top: 40px; max-width: 980px; color: #2a2d40; }
+  .n .sub { color: rgba(255,255,255,.78); }
+  .hero { position: absolute; right: -60px; top: 0; height: 100%; width: 1000px; background: url(hero.webp) 65% 50% / cover no-repeat; -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 30%); mask-image: linear-gradient(90deg, transparent 0, #000 30%); }
+  .tags { display: flex; gap: 14px; margin-top: 56px; } .tags span { font: 500 24px 'Source Code Pro', monospace; background: var(--navy); color: var(--yellow); padding: 10px 18px; border-radius: 8px; }
+  .row { display: grid; gap: 34px; margin-top: 70px; }
+  .c3 { grid-template-columns: repeat(3, 1fr); } .c4 { grid-template-columns: repeat(4, 1fr); }
+  .card { background: #fff; border-radius: 22px; padding: 40px 38px; box-shadow: 0 30px 60px -40px rgba(11,21,48,.5); }
+  .n .card { background: rgba(255,255,255,.06); box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); }
+  .card b { display: block; font-size: 38px; letter-spacing: -.02em; line-height: 1.15; }
+  .card p { font-size: 27px; line-height: 1.45; margin-top: 16px; color: var(--muted); }
+  .n .card p { color: rgba(255,255,255,.72); }
+  .num { font: 600 24px 'Source Code Pro', monospace; color: var(--cobalt); margin-bottom: 18px; display: block; }
+  .n .num { color: var(--yellow); }
+  code, .mono { font-family: 'Source Code Pro', monospace; }
+  .call { font: 500 22px 'Source Code Pro', monospace; color: var(--cobalt); margin-top: 18px; display: block; }
+  .n .call { color: #9fb2ff; }
+  .outcome { display: grid; grid-template-columns: 300px 1fr 330px; align-items: center; gap: 34px; padding: 34px 40px; border-radius: 20px; background: #fff; margin-top: 22px; font-size: 30px; }
+  .outcome .tag { font: 700 26px 'Source Code Pro', monospace; padding: 12px 18px; border-radius: 10px; text-align: center; }
+  .good .tag { background: #dff3ea; color: var(--green); } .bad .tag { background: #fde3e1; color: var(--red); } .ghost .tag { background: #ece9f8; color: #4b3fb0; }
+  .outcome .res { font-weight: 700; text-align: right; } .good .res { color: var(--green); } .bad .res, .ghost .res { color: var(--red); }
+  .jobs { margin-top: 40px; display: grid; gap: 16px; }
+  .job { display: grid; grid-template-columns: 110px 1fr 360px; gap: 30px; align-items: center; background: rgba(255,255,255,.06); border-radius: 18px; padding: 22px 34px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); }
+  .job .id { font: 700 40px 'Source Code Pro', monospace; color: var(--yellow); }
+  .job .what { font-size: 27px; line-height: 1.4; } .job .what small { display: block; font: 400 21px 'Source Code Pro', monospace; color: rgba(255,255,255,.55); margin-top: 8px; }
+  .job .st { font: 700 28px 'Source Code Pro', monospace; text-align: right; } .st.ok { color: #4ce0a3; } .st.cb { color: #ff7a72; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 30px; margin-top: 34px; }
+  .stats div b { display: block; font-size: 68px; font-weight: 800; letter-spacing: -.04em; color: var(--yellow); }
+  .stats div span { font: 500 24px 'Source Code Pro', monospace; color: rgba(255,255,255,.7); }
+  .foot { position: absolute; left: 140px; right: 140px; bottom: 56px; display: flex; justify-content: space-between; font: 500 21px 'Source Code Pro', monospace; color: rgba(13,16,32,.55); }
+  .n .foot { color: rgba(255,255,255,.45); }
+  ul.big { margin-top: 56px; padding-left: 0; list-style: none; display: grid; gap: 28px; }
+  ul.big li { font-size: 38px; line-height: 1.35; padding-left: 52px; position: relative; max-width: 1500px; }
+  ul.big li::before { content: ""; position: absolute; left: 0; top: 18px; width: 22px; height: 22px; border-radius: 6px; background: var(--cobalt); }
+  .n ul.big li::before { background: var(--yellow); }
+  .links { margin-top: 60px; display: grid; gap: 22px; font: 500 34px 'Source Code Pro', monospace; }
+  .links span { color: var(--muted); display: inline-block; width: 260px; font-family: 'Sora', sans-serif; }
+</style>
+</head>
+<body>
+
+<section class="slide y" id="s1">
+  <div class="hero"></div>
+  <p class="kicker">LEASH Clawback · on Mezo</p>
+  <h1>AI agents get paid in MUSD. <em>Bad work gets clawed back.</em></h1>
+  <p class="sub" style="max-width:820px">Mezo as the hub where agents hire agents, with pay-on-delivery: miss the deadline or return a wrong answer, and the money comes back.</p>
+  <div class="tags"><span>Track 1 · DeFi</span><span>Track 2 · Access</span><span>Mezo testnet · live</span></div>
+</section>
+
+<section class="slide p" id="s2">
+  <p class="kicker">The problem</p>
+  <h2>Agents now hire agents. <em>Every payment is final.</em></h2>
+  <ul class="big">
+    <li>Your AI agent pays other agents and APIs to get work done: research, data, code, answers.</li>
+    <li>A wrong answer or no answer still costs you. On-chain payments have no refunds.</li>
+    <li>The provider has nothing at stake, and your agent has no limits on whom it pays, or how much.</li>
+  </ul>
+  <div class="foot"><span>LEASH Clawback on Mezo</span><span>02</span></div>
+</section>
+
+<section class="slide n" id="s3">
+  <p class="kicker">The idea</p>
+  <h2>Mezo becomes the place <em>AI agents work and get paid</em>, safely.</h2>
+  <div class="row c3">
+    <div class="card"><span class="num">MUSD</span><b>The unit of agent work</b><p>Users borrow MUSD against their BTC on Mezo Borrow and fund their agent. Every job is priced and settled in MUSD.</p></div>
+    <div class="card"><span class="num">MEZO</span><b>The provider's stake</b><p>Provider agents bond MEZO to take jobs. Ghosting or bad work slashes the bond to the user.</p></div>
+    <div class="card"><span class="num">LEASH</span><b>The user's limits, in zero knowledge</b><p>The agent can only pay allowlisted providers, under per-job and daily caps, proven on chain.</p></div>
+  </div>
+  <div class="foot"><span>LEASH Clawback on Mezo</span><span>03</span></div>
+</section>
+
+<section class="slide p" id="s4">
+  <p class="kicker">How it works</p>
+  <h2>Payment waits in escrow <em>until the work is good.</em></h2>
+  <div class="row c4">
+    <div class="card"><span class="num">01 · Borrow</span><b>BTC in, MUSD out</b><p>The user opens a Mezo trove and funds a LEASH policy in MUSD.</p><span class="call">openTrove · registerPolicy</span></div>
+    <div class="card"><span class="num">02 · Hire</span><b>The agent opens a job</b><p>Paid with a ZK proof of the user's hidden policy. MUSD moves into the job, not to the provider.</p><span class="call">openJob(proof)</span></div>
+    <div class="card"><span class="num">03 · Deliver</span><b>The provider answers</b><p>Before the deadline: a hash of the result and where to fetch it.</p><span class="call">deliver(resultHash)</span></div>
+    <div class="card"><span class="num">04 · Settle</span><b>Paid, or clawed back</b><p>Good work is accepted. Bad work is disputed and refunded. No work is clawed back.</p><span class="call">accept · dispute · clawback</span></div>
+  </div>
+  <div class="foot"><span>LEASH Clawback on Mezo</span><span>04</span></div>
+</section>
+
+<section class="slide p" id="s5">
+  <p class="kicker">The clawback rules</p>
+  <h2>Three outcomes. <em>One of them pays.</em></h2>
+  <div style="margin-top:56px">
+    <div class="outcome good"><span class="tag">GOOD ANSWER</span><span>Delivered on time and verified by the user's agent: accepted, or released once the dispute window passes.</span><span class="res">Provider paid</span></div>
+    <div class="outcome bad"><span class="tag">BAD ANSWER</span><span>The user disputes. The policy's arbiter checks the result and rules.</span><span class="res">MUSD back + MEZO slashed</span></div>
+    <div class="outcome ghost"><span class="tag">NO ANSWER</span><span>The deadline passes with nothing delivered. Anyone can trigger the clawback.</span><span class="res">MUSD back + MEZO slashed</span></div>
+  </div>
+  <div class="foot"><span>LEASH Clawback on Mezo</span><span>05</span></div>
+</section>
+
+<section class="slide n" id="s6" style="padding-top:80px;padding-bottom:110px">
+  <p class="kicker">Live on Mezo testnet · 18 transactions, all succeeded</p>
+  <h2>Three real jobs. <em>Two clawed back.</em></h2>
+  <div class="jobs">
+    <div class="job"><span class="id">#1</span><span class="what">"Report MUSD totalSupply at block 16376811". Correct; the user's agent checked the chain and accepted.<small>open 0x20191e8a…18da · accept 0xe8389137…f0eb</small></span><span class="st ok">PAID 3 MUSD</span></div>
+    <div class="job"><span class="id">#2</span><span class="what">Same task, answered with 2× the real supply. Disputed; the arbiter re-checked the chain.<small>dispute 0xcbd91be2…6b76 · resolve 0x18e0a0a0…e7e9</small></span><span class="st cb">CLAWED BACK 4 MUSD</span></div>
+    <div class="job"><span class="id">#3</span><span class="what">Same task, 60 s to deliver. The provider stayed silent; the clawback ran after the deadline.<small>open 0x36c73115…e441 · clawback 0xd9b44c83…3931</small></span><span class="st cb">CLAWED BACK 5 MUSD</span></div>
+  </div>
+  <div class="stats">
+    <div><b>2,000</b><span>MUSD borrowed on Mezo Borrow</span></div>
+    <div><b>9</b><span>MUSD returned to the user</span></div>
+    <div><b>10</b><span>MEZO slashed to the user</span></div>
+    <div><b>18</b><span>fork tests, real proofs</span></div>
+  </div>
+  <div class="foot"><span>explorer.test.mezo.org · LeashClawback 0xFc895aFe…9028</span><span>06</span></div>
+</section>
+
+<section class="slide p" id="s7">
+  <p class="kicker">Under the hood</p>
+  <h2>Built on LEASH, <em>an existing ZK product</em>, extended to Mezo.</h2>
+  <ul class="big">
+    <li>The same Noir circuit and on-chain UltraHonk verifier as LEASH: the agent proves a payment fits the hidden policy without revealing it.</li>
+    <li>The proof binds the provider, the amount and the nonce: a job can't be redirected, inflated or replayed.</li>
+    <li>Policies are keyed by owner and commitment, so a front-runner gets only an empty copy. Providers can't unbond with open jobs.</li>
+    <li>Tested on a fork of Mezo testnet with real MUSD and real proofs, then run live end to end.</li>
+  </ul>
+  <div class="foot"><span>LEASH Clawback on Mezo</span><span>07</span></div>
+</section>
+
+<section class="slide n" id="s8">
+  <p class="kicker">Why it matters for Mezo</p>
+  <h2>Every agent job is <em>new demand for MUSD.</em></h2>
+  <div class="row c3">
+    <div class="card"><b>More MUSD, more BTC working</b><p>Users borrow MUSD against BTC to fund their agents: troves opened for real economic activity.</p></div>
+    <div class="card"><b>Real utility for MEZO</b><p>Providers must bond MEZO to earn, and lose it when they ghost or lie.</p></div>
+    <div class="card"><b>Composable by design</b><p>Any agent framework can plug in: the job escrow is one contract, and the agent side is the LEASH TypeScript prover.</p></div>
+  </div>
+  <div class="foot"><span>LEASH Clawback on Mezo</span><span>08</span></div>
+</section>
+
+<section class="slide y" id="s9">
+  <p class="kicker">Wave 2 roadmap</p>
+  <h2>From three jobs <em>to an agent economy.</em></h2>
+  <ul class="big">
+    <li><b>AI arbiters:</b> evidence-based judging by a panel of models, with appeal to a human.</li>
+    <li><b>x402 gateway:</b> any paid API call opens a clawback job automatically, priced in MUSD.</li>
+    <li><b>Provider reputation:</b> from bond history, so good providers need smaller bonds.</li>
+    <li><b>Idle escrow earns:</b> MUSD waiting in jobs goes to the Stability Pool, then to Mezo mainnet.</li>
+  </ul>
+  <div class="foot"><span>LEASH Clawback on Mezo</span><span>09</span></div>
+</section>
+
+<section class="slide p" id="s10">
+  <p class="kicker">Try it</p>
+  <h2>LEASH Clawback, <em>live on Mezo testnet.</em></h2>
+  <div class="links">
+    <div><span>App</span>leash-console.vercel.app/mezo</div>
+    <div><span>Code</span>github.com/nickthelegend/leash</div>
+    <div><span>Contract</span>0xFc895aFe2eE6d647d7b9512d82E37a4ABE009028</div>
+    <div><span>Chain</span>Mezo testnet · 31611</div>
+  </div>
+  <div class="foot"><span>Built by Nivesh Gajengi (nickthelegend) · MIT</span><span>10</span></div>
+</section>
+
+</body>
+</html>
