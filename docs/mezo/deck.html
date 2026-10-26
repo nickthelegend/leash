@@ -54,6 +54,9 @@
   .n ul.big li::before { background: var(--yellow); }
   .links { margin-top: 60px; display: grid; gap: 22px; font: 500 34px 'Source Code Pro', monospace; }
   .links span { color: var(--muted); display: inline-block; width: 260px; font-family: 'Sora', sans-serif; }
+.art { position: absolute; right: -40px; top: 0; height: 100%; width: 1080px; background-position: 70% 50%; background-size: cover; background-repeat: no-repeat; -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 28%); mask-image: linear-gradient(90deg, transparent 0, #000 28%); }
+  .art.hub { background-image: url(hub.webp); width: 960px; right: -120px; background-position: 80% 60%; -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 22%); mask-image: linear-gradient(90deg, transparent 0, #000 22%); } .art.claw { background-image: url(clawback.webp); background-position: 55% 50%; }
+  .y h2 { position: relative; max-width: 900px; } .y .sub { position: relative; }
 </style>
 </head>
 <body>
@@ -77,6 +80,14 @@
   <div class="foot"><span>LEASH Clawback on Mezo</span><span>02</span></div>
 </section>
 
+<section class="slide y" id="s2b">
+  <div class="art hub"></div>
+  <p class="kicker">The hub</p>
+  <h2>Mezo is where <em>agents hire agents.</em></h2>
+  <p class="sub" style="max-width:820px">Users fund agents with MUSD borrowed against BTC. Providers bond MEZO to take jobs. Every payment waits in escrow.</p>
+  <div class="foot"><span>LEASH Clawback on Mezo</span><span>03</span></div>
+</section>
+
 <section class="slide n" id="s3">
   <p class="kicker">The idea</p>
   <h2>Mezo becomes the place <em>AI agents work and get paid</em>, safely.</h2>
@@ -85,7 +96,7 @@
     <div class="card"><span class="num">MEZO</span><b>The provider's stake</b><p>Provider agents bond MEZO to take jobs. Ghosting or bad work slashes the bond to the user.</p></div>
     <div class="card"><span class="num">LEASH</span><b>The user's limits, in zero knowledge</b><p>The agent can only pay allowlisted providers, under per-job and daily caps, proven on chain.</p></div>
   </div>
-  <div class="foot"><span>LEASH Clawback on Mezo</span><span>03</span></div>
+  <div class="foot"><span>LEASH Clawback on Mezo</span><span>04</span></div>
 </section>
 
 <section class="slide p" id="s4">
@@ -97,7 +108,15 @@
     <div class="card"><span class="num">03 · Deliver</span><b>The provider answers</b><p>Before the deadline: a hash of the result and where to fetch it.</p><span class="call">deliver(resultHash)</span></div>
     <div class="card"><span class="num">04 · Settle</span><b>Paid, or clawed back</b><p>Good work is accepted. Bad work is disputed and refunded. No work is clawed back.</p><span class="call">accept · dispute · clawback</span></div>
   </div>
-  <div class="foot"><span>LEASH Clawback on Mezo</span><span>04</span></div>
+  <div class="foot"><span>LEASH Clawback on Mezo</span><span>05</span></div>
+</section>
+
+<section class="slide y" id="s4b">
+  <div class="art claw"></div>
+  <p class="kicker">The clawback</p>
+  <h2>Wrong answer or no answer? <em>The MUSD comes back.</em></h2>
+  <p class="sub" style="max-width:820px">And the provider's MEZO bond pays for the trouble.</p>
+  <div class="foot"><span>LEASH Clawback on Mezo</span><span>06</span></div>
 </section>
 
 <section class="slide p" id="s5">
@@ -108,7 +127,7 @@
     <div class="outcome bad"><span class="tag">BAD ANSWER</span><span>The user disputes. The policy's arbiter checks the result and rules.</span><span class="res">MUSD back + MEZO slashed</span></div>
     <div class="outcome ghost"><span class="tag">NO ANSWER</span><span>The deadline passes with nothing delivered. Anyone can trigger the clawback.</span><span class="res">MUSD back + MEZO slashed</span></div>
   </div>
-  <div class="foot"><span>LEASH Clawback on Mezo</span><span>05</span></div>
+  <div class="foot"><span>LEASH Clawback on Mezo</span><span>07</span></div>
 </section>
 
 <section class="slide n" id="s6" style="padding-top:80px;padding-bottom:110px">
@@ -125,7 +144,7 @@
     <div><b>10</b><span>MEZO slashed to the user</span></div>
     <div><b>18</b><span>fork tests, real proofs</span></div>
   </div>
-  <div class="foot"><span>explorer.test.mezo.org · LeashClawback 0xFc895aFe…9028</span><span>06</span></div>
+  <div class="foot"><span>explorer.test.mezo.org · LeashClawback 0xFc895aFe…9028</span><span>08</span></div>
 </section>
 
 <section class="slide p" id="s7">
@@ -137,7 +156,7 @@
     <li>Policies are keyed by owner and commitment, so a front-runner gets only an empty copy. Providers can't unbond with open jobs.</li>
     <li>Tested on a fork of Mezo testnet with real MUSD and real proofs, then run live end to end.</li>
   </ul>
-  <div class="foot"><span>LEASH Clawback on Mezo</span><span>07</span></div>
+  <div class="foot"><span>LEASH Clawback on Mezo</span><span>09</span></div>
 </section>
 
 <section class="slide n" id="s8">
@@ -148,7 +167,7 @@
     <div class="card"><b>Real utility for MEZO</b><p>Providers must bond MEZO to earn, and lose it when they ghost or lie.</p></div>
     <div class="card"><b>Composable by design</b><p>Any agent framework can plug in: the job escrow is one contract, and the agent side is the LEASH TypeScript prover.</p></div>
   </div>
-  <div class="foot"><span>LEASH Clawback on Mezo</span><span>08</span></div>
+  <div class="foot"><span>LEASH Clawback on Mezo</span><span>10</span></div>
 </section>
 
 <section class="slide y" id="s9">
@@ -160,7 +179,7 @@
     <li><b>Provider reputation:</b> from bond history, so good providers need smaller bonds.</li>
     <li><b>Idle escrow earns:</b> MUSD waiting in jobs goes to the Stability Pool, then to Mezo mainnet.</li>
   </ul>
-  <div class="foot"><span>LEASH Clawback on Mezo</span><span>09</span></div>
+  <div class="foot"><span>LEASH Clawback on Mezo</span><span>11</span></div>
 </section>
 
 <section class="slide p" id="s10">
@@ -172,7 +191,7 @@
     <div><span>Contract</span>0xFc895aFe2eE6d647d7b9512d82E37a4ABE009028</div>
     <div><span>Chain</span>Mezo testnet · 31611</div>
   </div>
-  <div class="foot"><span>Built by Nivesh Gajengi (nickthelegend) · MIT</span><span>10</span></div>
+  <div class="foot"><span>Built by Nivesh Gajengi (nickthelegend) · MIT</span><span>12</span></div>
 </section>
 
 </body>
