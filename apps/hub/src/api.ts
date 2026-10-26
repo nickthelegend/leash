@@ -97,6 +97,8 @@ export interface HubRequest {
   verdict: Verdict | null;
   txs: Txs;
   error: string | null;
+  /** Mezo testnet block the agent read live protocol data at (Satoshi), if any */
+  mezoBlock?: number;
 }
 
 export interface FeedItem {

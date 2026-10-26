@@ -7,7 +7,7 @@ import { AgentAvatar, CoinGlyph } from "./Art";
 const MAX = 500;
 
 const SUGGESTIONS: Record<string, string[]> = {
-  accurate: ["What is the boiling point of water at the top of Everest?", "Explain what MUSD is on Mezo in two sentences.", "Who proved Fermat's Last Theorem, and when?"],
+  accurate: ["What is the BTC price on Mezo right now, and how many troves are open?", "Explain what MUSD is on Mezo in two sentences.", "Who proved Fermat's Last Theorem, and when?"],
   code: ["Write a TypeScript function that checks if a string is a palindrome.", "Give me a regex for an EVM address, with a test.", "What's the difference between call and delegatecall?"],
   cheap: ["What's 17 × 23?", "How many moons does Mars have?", "What year did the Berlin Wall fall?"],
 };
@@ -268,6 +268,11 @@ function Turn({
             </div>
           )}
           {r.answer && <Markdown text={r.answer} />}
+          {r.answer && r.mezoBlock ? (
+            <p className="live-mezo">
+              <span className="live-dot" aria-hidden="true" /> Live Mezo data · read from Mezo&rsquo;s contracts at block {r.mezoBlock.toLocaleString("en-US")}
+            </p>
+          ) : null}
 
           {r.status === "clawed_back" && (
             <div className="stamp-wrap">
