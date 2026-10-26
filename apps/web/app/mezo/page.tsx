@@ -6,9 +6,9 @@ import { SiteFooter } from '@/components/Landing';
 import { MezoLeash } from '@/components/MezoLeash';
 
 export const metadata: Metadata = {
-  title: 'LEASH on Mezo · Bitcoin credit for AI agents',
+  title: 'LEASH on Mezo · AI agents paid in MUSD, bad work clawed back',
   description:
-    'An AI agent spends Bitcoin-backed MUSD only with zero-knowledge proofs of its owner’s hidden policy, and only while the owner’s Mezo trove stays above a collateral floor.',
+    'Your agent hires other agents on Mezo with ZK-proven MUSD payments held in escrow. Miss the deadline or return a wrong answer, and the MUSD comes back, plus a slice of the provider’s MEZO bond.',
 };
 
 // Static: rendered at build time (and exported by scripts/build-vercel.mjs as mezo.html).

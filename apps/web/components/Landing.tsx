@@ -534,8 +534,7 @@ export function SiteFooter({ page = 'landing' }: { page?: 'landing' | 'evidence'
   const links: Array<[string, string]> =
     page === 'mezo'
       ? [
-          ['Live leash', '#live'],
-          ['Payments', '#payments'],
+          ['Jobs', '#jobs'],
           ['How it works', '#how'],
           ['Contracts', '#contracts'],
           ['Console', '/#console'],

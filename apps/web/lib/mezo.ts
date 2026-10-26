@@ -5,15 +5,14 @@ export const MEZO = {
   rpc: 'https://rpc.test.mezo.org',
   chainId: 31611,
   explorer: 'https://explorer.test.mezo.org',
-  // mezo-org/musd matsnet deployments
+  // mezo-org/musd matsnet deployments, and Mezo's MEZO token
   musd: '0x118917a40FAF1CD7a13dB0Ef56C86De7973Ac503',
+  mezo: '0x7b7c000000000000000000000000000000000001',
   troveManager: '0xE47c80e8c23f6B4A1aE41c34837a0599D5D16bb0',
   priceFeed: '0x86bCF0841622a5dAC14A313a15f96A95421b9366',
   borrowerOperations: '0xCdF7028ceAB81fA0C6971208e83fa7872994beE5',
 } as const;
 
-/** Mezo's minimum collateral ratio (110%), 1e18 scale. */
-export const MCR = BigInt('1100000000000000000');
 export const ONE = BigInt('1000000000000000000');
 /** 1 cent in MUSD wei (MUSD has 18 decimals). */
 export const CENT_WEI = BigInt('10000000000000000');
@@ -22,37 +21,46 @@ export const LOG_RANGE = 9_999;
 
 export const SEL = {
   fetchPrice: '0x0fdb11cf',
-  getCurrentICR: '0xd293c710',
-  getTroveStatus: '0x21e37801',
-  troveHealth: '0xdb83bbff',
-  policyIdOf: '0x99840b8e',
-  policyBalance: '0x472d920d',
-  minTroveICR: '0x6537d386',
-  balanceOf: '0x70a08231',
   totalSupply: '0x18160ddd',
+  // LeashClawback
+  jobs: '0x180aedf3',
+  jobCount: '0x4c5d8a0f',
+  bondOf: '0x72d2b6c0',
+  openJobs: '0xd046a8fa',
+  policyBalance: '0x472d920d',
+  policyIdOf: '0x99840b8e',
+  disputeWindow: '0x117f5f92',
+  minBond: '0x831518b7',
+  slashAmount: '0x8802834e',
 } as const;
 
 export const TOPIC = {
-  paymentReleased: '0x6f2be91d5b1c8ba6f0ec6d97e6404433a41cae601d77d1bb321a0b52cc042513',
-  troveGuardSet: '0xd8dccf7849bf85a655b9faee4f0a42aeb0d200cad03e9c988ef89ab26a9a007b',
+  jobOpened: '0x36a98d75da7a8e3ebe531e2557be53b01a53f0d49d42dac9ac42d862cd384a83',
+  jobDelivered: '0xef704faeb1c0990923ca5e91e089af2aa02a4c9786c9674ee66d69f57a81d574',
+  jobDisputed: '0x703048d4371fa157ebfc6261a165c1a4d1ca62f724bf5ba3d22753c460e24ba9',
+  jobReleased: '0xac829ac5edc9bdd72b9facaf645f2f6a752872eefc57eb9a0404b782594ca84a',
+  jobClawedBack: '0xffad8168f7772573f3840010718402d3603fc9d93684bc284400ed6ea4282ec0',
+  bondChanged: '0x0cd3b4c036d7d3c2e32a738e75a571d5885202d7d6580e23dccd8ef50803f103',
 } as const;
 
-export const ERR = {
-  troveBelowLeash: '0x91458773',
-  troveNotActive: '0xbeb97d70',
-} as const;
+/** LeashClawback.Status */
+export const JOB_STATUS = ['None', 'Pending', 'Delivered', 'Disputed', 'Released', 'ClawedBack'] as const;
 
-/** MUSD TroveManager Status enum. */
-export const TROVE_STATUS = ['does not exist', 'active', 'closed by owner', 'closed by liquidation', 'closed by redemption'];
+/** Off-chain notes the run adds for a job (what was asked, what came back, why it was judged so). */
+export type JobNote = { jobId: number; task?: string; answer?: string; correct?: string; verdict?: string };
 
 export type Deployment = {
   chainId: number;
-  leashMUSD: string | null;
+  leashClawback: string | null;
   verifier: string | null;
   owner: string | null;
+  agent: string | null;
+  provider: string | null;
+  arbiter: string | null;
   policyCommitment: string | null;
   deployBlock: number | null;
   txs: Record<string, string | { hash: string; label?: string; note?: string }>;
+  jobs: JobNote[];
 };
 
 const ADDR = /^0x[0-9a-fA-F]{40}$/;
@@ -77,19 +85,53 @@ export function parseDeployment(raw: unknown): Deployment {
     throw new Error('deployment.json: deployBlock is not a block number');
   if (d.chainId !== MEZO.chainId) throw new Error(`deployment.json: chainId ${String(d.chainId)} is not Mezo testnet (${MEZO.chainId})`);
   const txs = (d.txs && typeof d.txs === 'object' ? d.txs : {}) as Deployment['txs'];
+  const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v : undefined);
+  const jobs: JobNote[] = Array.isArray(d.jobs)
+    ? d.jobs.flatMap((j) => {
+        if (!j || typeof j !== 'object') return [];
+        const o = j as Record<string, unknown>;
+        const id = Number(o.jobId);
+        if (!Number.isInteger(id) || id <= 0) return [];
+        return [{ jobId: id, task: str(o.task), answer: str(o.answer), correct: str(o.correct), verdict: str(o.verdict) }];
+      })
+    : [];
   return {
     chainId: MEZO.chainId,
-    leashMUSD: addr('leashMUSD'),
+    leashClawback: addr('leashClawback'),
     verifier: addr('verifier'),
     owner: addr('owner'),
+    agent: addr('agent'),
+    provider: addr('provider'),
+    arbiter: addr('arbiter'),
     policyCommitment: (pc as string | null | undefined) ?? null,
     deployBlock: (db as number | null | undefined) ?? null,
     txs,
+    jobs,
   };
 }
 
 let rpcId = 0;
-export async function rpc<T>(method: string, params: unknown[], signal?: AbortSignal): Promise<T> {
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * One JSON-RPC call. rpc.test.mezo.org is load-balanced and a node can lag a few blocks behind: a failed call, or a
+ * null result where one is required (`nullable: false`, e.g. a just-mined receipt), is retried once before it is shown.
+ */
+export async function rpc<T>(method: string, params: unknown[], signal?: AbortSignal, nullable = true): Promise<T> {
+  try {
+    const r = await rpcOnce<T>(method, params, signal);
+    if (r === null && !nullable) throw new Error(`Mezo testnet RPC ${method}: no result yet`);
+    return r;
+  } catch (e) {
+    if ((e as Error)?.name === 'AbortError') throw e;
+    await sleep(1200);
+    const r = await rpcOnce<T>(method, params, signal);
+    if (r === null && !nullable) throw new Error(`Mezo testnet RPC ${method}: no result after a retry (the node may be lagging)`);
+    return r;
+  }
+}
+
+async function rpcOnce<T>(method: string, params: unknown[], signal?: AbortSignal): Promise<T> {
   let res: Response;
   try {
     res = await fetch(MEZO.rpc, {
@@ -131,9 +173,6 @@ export const wordAddress = (hex: string, i = 0) => `0x${hex.replace(/^0x/, '').s
 /** 1e18-scaled fixed point as a JS number (precision is display-only). */
 export const fromE18 = (v: bigint) => Number(v / BigInt(1e12)) / 1e6;
 
-/** getCurrentICR returns 2^256-1 for a trove with no debt. */
-export const ICR_UNBOUNDED = BigInt(1e6) * ONE;
-
 export function fmtUsd(v: number, digits = 2) {
   return v.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: digits, maximumFractionDigits: digits });
 }
@@ -143,8 +182,25 @@ export function fmtMusd(wei: bigint) {
   const frac = (cents % BigInt(100)).toString().padStart(2, '0');
   return `${whole.toLocaleString('en-US')}.${frac}`;
 }
-export function fmtPct(v1e18: bigint, digits = 1) {
-  return `${(fromE18(v1e18) * 100).toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })}%`;
+/** An 18-decimal token amount, up to `digits` decimals, trailing zeros dropped. */
+export function fmtToken(wei: bigint, digits = 2) {
+  const scale = BigInt(10) ** BigInt(18 - digits);
+  const units = wei / scale;
+  const base = BigInt(10) ** BigInt(digits);
+  const whole = (units / base).toLocaleString('en-US');
+  const frac = (units % base).toString().padStart(digits, '0').replace(/0+$/, '');
+  return frac ? `${whole}.${frac}` : whole;
+}
+
+/** A UTF-8 `string` from ABI data, given the word index that holds its offset. */
+export function abiString(hex: string, offsetWord: number): string {
+  const body = hex.replace(/^0x/, '');
+  const off = Number(word(hex, offsetWord)) * 2;
+  const len = Number(BigInt(`0x${body.slice(off, off + 64)}`));
+  const bytes = body.slice(off + 64, off + 64 + len * 2);
+  const arr = new Uint8Array(bytes.length / 2);
+  for (let i = 0; i < arr.length; i++) arr[i] = parseInt(bytes.slice(i * 2, i * 2 + 2), 16);
+  return new TextDecoder().decode(arr);
 }
 export const short = (h: string, front = 6, back = 4) => (h.length > front + back + 2 ? `${h.slice(0, front)}…${h.slice(-back)}` : h);
 export const txUrl = (h: string) => `${MEZO.explorer}/tx/${h}`;

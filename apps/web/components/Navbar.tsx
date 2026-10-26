@@ -17,8 +17,7 @@ export function Navbar({ page = 'landing' }: { page?: 'landing' | 'evidence' | '
         ]
       : page === 'mezo'
         ? [
-            ['Live leash', '#live'],
-            ['Payments', '#payments'],
+            ['Jobs', '#jobs'],
             ['How it works', '#how'],
             ['Contracts', '#contracts'],
           ]

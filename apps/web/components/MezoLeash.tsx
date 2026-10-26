@@ -4,20 +4,18 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowDown, ArrowUpRight, RefreshCw } from 'lucide-react';
 import {
   CENT_WEI,
-  ICR_UNBOUNDED,
   LOG_RANGE,
-  MCR,
   MEZO,
   SEL,
   TOPIC,
-  TROVE_STATUS,
+  abiString,
   addressUrl,
   blockUrl,
   encAddress,
   encBytes32,
   ethCall,
   fmtMusd,
-  fmtPct,
+  fmtToken,
   fmtUsd,
   fromE18,
   parseDeployment,
@@ -27,41 +25,61 @@ import {
   txUrl,
   word,
   wordAddress,
+  wordHex,
   type Deployment,
+  type JobNote,
 } from '@/lib/mezo';
 
 const REPO_URL = 'https://github.com/nickthelegend/leash';
 const REFRESH_MS = 15_000;
+const MAX_JOBS = 30; // newest jobs read from storage each refresh
+
+/* ------------------------------------------------------------------ types */
 
 type DeploymentState = { status: 'loading' } | { status: 'error'; error: string } | { status: 'ok'; dep: Deployment };
 
-type Live = {
-  block: number;
-  readAt: Date;
-  price: bigint; // PriceFeed.fetchPrice(), USD per BTC, 1e18
-  musdSupply: bigint;
-  // Present only when LeashMUSD and the owner are in deployment.json.
-  trove: { status: number; icr: bigint } | null;
-  policyId: string | null;
-  balance: bigint | null; // policy escrow, MUSD wei
-  floor: bigint | null; // minTroveICR, 1e18; 0 = guard off
+type Ev = { tx: string; block: number };
+type JobEvents = {
+  opened?: Ev & { amountCents: bigint; deadline: number; taskHash: string };
+  delivered?: Ev & { resultHash: string; uri: string };
+  disputed?: Ev & { reasonHash: string };
+  released?: Ev & { amountWei: bigint };
+  clawed?: Ev & { amountWei: bigint; slashed: bigint };
 };
 
-type FeedItem = {
-  key: string;
-  kind: 'payment' | 'guard';
-  block: number;
-  txHash: string;
+type Job = {
+  id: number;
   policyId: string;
-  amountCents?: bigint;
-  recipient?: string;
-  icr?: bigint;
-  floor?: bigint;
+  owner: string;
+  provider: string;
+  amountCents: bigint;
+  deadline: number;
+  deliveredAt: number;
+  status: number;
+  taskHash: string;
+  resultHash: string;
+};
+
+type Board = {
+  block: number;
+  blockTs: number; // chain time of `block`
+  readAtMs: number; // local time of the read, to tick countdowns between reads
+  price: bigint;
+  deployed: boolean;
+  jobCount: number | null;
+  escrow: bigint | null;
+  bond: bigint | null;
+  minBond: bigint | null;
+  slashAmount: bigint | null;
+  disputeWindow: number | null;
+  jobs: Job[];
 };
 
 type RpcLog = { blockNumber: string; transactionHash: string; logIndex: string; topics: string[]; data: string };
 
-/* ------------------------------------------------------------------ data hooks */
+const ZERO32 = `0x${'0'.repeat(64)}`;
+
+/* ------------------------------------------------------------------ data */
 
 function useDeployment(): DeploymentState {
   const [state, setState] = useState<DeploymentState>({ status: 'loading' });
@@ -81,51 +99,84 @@ function useDeployment(): DeploymentState {
   return state;
 }
 
-async function readLive(dep: Deployment | null, policyIdCache: { current: string | null }, signal: AbortSignal): Promise<Live> {
+type Immutables = { minBond: bigint; slashAmount: bigint; disputeWindow: number; policyId: string | null };
+
+async function readBoard(dep: Deployment | null, cache: { current: Immutables | null }, signal: AbortSignal): Promise<Board> {
   const [chainHex, blockHex] = await Promise.all([rpc<string>('eth_chainId', [], signal), rpc<string>('eth_blockNumber', [], signal)]);
   if (Number(chainHex) !== MEZO.chainId) throw new Error(`RPC is on chain ${Number(chainHex)}, not Mezo testnet (${MEZO.chainId})`);
-  const at = blockHex; // every read below is pinned to this one block
-  const [priceHex, supplyHex] = await Promise.all([
+  const at = blockHex; // every read below is pinned to this block
+  const [blk, priceHex] = await Promise.all([
+    rpc<{ timestamp: string } | null>('eth_getBlockByNumber', [at, false], signal, false),
     ethCall(MEZO.priceFeed, SEL.fetchPrice, at, signal),
-    ethCall(MEZO.musd, SEL.totalSupply, at, signal),
   ]);
-  const live: Live = {
+  if (!blk) throw new Error(`Block ${Number(blockHex)} not found`);
+  const board: Board = {
     block: Number(blockHex),
-    readAt: new Date(),
+    blockTs: Number(blk.timestamp),
+    readAtMs: Date.now(),
     price: word(priceHex),
-    musdSupply: word(supplyHex),
-    trove: null,
-    policyId: null,
-    balance: null,
-    floor: null,
+    deployed: !!dep?.leashClawback,
+    jobCount: null,
+    escrow: null,
+    bond: null,
+    minBond: null,
+    slashAmount: null,
+    disputeWindow: null,
+    jobs: [],
   };
-  if (!dep?.leashMUSD || !dep.owner) return live;
-  const leash = dep.leashMUSD;
-  const health = await ethCall(leash, SEL.troveHealth + encAddress(dep.owner), at, signal);
-  live.trove = { status: Number(word(health, 0)), icr: word(health, 1) };
-  if (dep.policyCommitment) {
-    if (!policyIdCache.current) {
-      const pid = await ethCall(leash, SEL.policyIdOf + encAddress(dep.owner) + encBytes32(dep.policyCommitment), at, signal);
-      policyIdCache.current = `0x${pid.replace(/^0x/, '').slice(0, 64)}`;
-    }
-    const pid = encBytes32(policyIdCache.current);
-    const [bal, floor] = await Promise.all([
-      ethCall(leash, SEL.policyBalance + pid, at, signal),
-      ethCall(leash, SEL.minTroveICR + pid, at, signal),
+  const c = dep?.leashClawback;
+  if (!c) return board;
+
+  if (!cache.current) {
+    const [mb, sa, dw, pid] = await Promise.all([
+      ethCall(c, SEL.minBond, at, signal),
+      ethCall(c, SEL.slashAmount, at, signal),
+      ethCall(c, SEL.disputeWindow, at, signal),
+      dep.owner && dep.policyCommitment
+        ? ethCall(c, SEL.policyIdOf + encAddress(dep.owner) + encBytes32(dep.policyCommitment), at, signal)
+        : Promise.resolve(null),
     ]);
-    live.policyId = policyIdCache.current;
-    live.balance = word(bal);
-    live.floor = word(floor);
+    cache.current = { minBond: word(mb), slashAmount: word(sa), disputeWindow: Number(word(dw)), policyId: pid ? wordHex(pid) : null };
   }
-  return live;
+  const im = cache.current;
+  board.minBond = im.minBond;
+  board.slashAmount = im.slashAmount;
+  board.disputeWindow = im.disputeWindow;
+
+  const [countHex, escrowHex, bondHex] = await Promise.all([
+    ethCall(c, SEL.jobCount, at, signal),
+    im.policyId ? ethCall(c, SEL.policyBalance + encBytes32(im.policyId), at, signal) : Promise.resolve(null),
+    dep.provider ? ethCall(c, SEL.bondOf + encAddress(dep.provider), at, signal) : Promise.resolve(null),
+  ]);
+  const count = Number(word(countHex));
+  board.jobCount = count;
+  board.escrow = escrowHex ? word(escrowHex) : null;
+  board.bond = bondHex ? word(bondHex) : null;
+
+  const ids: number[] = [];
+  for (let i = count; i >= 1 && ids.length < MAX_JOBS; i--) ids.push(i);
+  const raw = await Promise.all(ids.map((i) => ethCall(c, SEL.jobs + i.toString(16).padStart(64, '0'), at, signal)));
+  board.jobs = raw.map((h, k) => ({
+    id: ids[k],
+    policyId: wordHex(h, 0),
+    owner: wordAddress(h, 1),
+    provider: wordAddress(h, 2),
+    amountCents: word(h, 3),
+    deadline: Number(word(h, 4)),
+    deliveredAt: Number(word(h, 5)),
+    status: Number(word(h, 6)),
+    taskHash: wordHex(h, 7),
+    resultHash: wordHex(h, 8),
+  }));
+  return board;
 }
 
-function useLiveLeash(dep: Deployment | null, ready: boolean) {
-  const [live, setLive] = useState<Live | null>(null);
+function useBoard(dep: Deployment | null, ready: boolean) {
+  const [board, setBoard] = useState<Board | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const inFlight = useRef<AbortController | null>(null);
-  const policyIdCache = useRef<string | null>(null);
+  const cache = useRef<Immutables | null>(null);
 
   const refresh = useCallback(async () => {
     if (!ready || inFlight.current) return;
@@ -133,8 +184,7 @@ function useLiveLeash(dep: Deployment | null, ready: boolean) {
     inFlight.current = ctrl;
     setBusy(true);
     try {
-      const next = await readLive(dep, policyIdCache, ctrl.signal);
-      setLive(next);
+      setBoard(await readBoard(dep, cache, ctrl.signal));
       setError(null);
     } catch (e) {
       if ((e as Error)?.name !== 'AbortError') setError(String((e as Error)?.message ?? e));
@@ -147,9 +197,7 @@ function useLiveLeash(dep: Deployment | null, ready: boolean) {
   useEffect(() => {
     if (!ready) return;
     refresh();
-    const t = setInterval(() => {
-      if (document.visibilityState === 'visible') refresh();
-    }, REFRESH_MS);
+    const t = setInterval(() => document.visibilityState === 'visible' && refresh(), REFRESH_MS);
     const onVisible = () => document.visibilityState === 'visible' && refresh();
     document.addEventListener('visibilitychange', onVisible);
     return () => {
@@ -160,76 +208,84 @@ function useLiveLeash(dep: Deployment | null, ready: boolean) {
     };
   }, [ready, refresh]);
 
-  return { live, error, busy, refresh };
+  return { board, error, busy, refresh };
 }
 
-function decodeLog(l: RpcLog): FeedItem | null {
-  const base = {
-    key: `${l.transactionHash}:${l.logIndex}`,
-    block: Number(l.blockNumber),
-    txHash: l.transactionHash,
-    policyId: l.topics[1] ?? '',
-  };
-  if (l.topics[0] === TOPIC.paymentReleased)
-    return { ...base, kind: 'payment', amountCents: word(l.data, 0), recipient: wordAddress(l.data, 1), icr: word(l.data, 2) };
-  if (l.topics[0] === TOPIC.troveGuardSet) return { ...base, kind: 'guard', floor: word(l.data, 0) };
-  return null;
-}
-
-/** PaymentReleased and TroveGuardSet logs since deployBlock, scanned incrementally in 10k-block windows. */
-function useFeed(dep: Deployment | null, latestBlock: number | null) {
-  const [items, setItems] = useState<FeedItem[]>([]);
+/** Job events since deployBlock, scanned incrementally in 10k-block windows; block times for each event's block. */
+function useJobEvents(contract: string | null, deployBlock: number | null, latestBlock: number | null) {
+  const [events, setEvents] = useState<Record<number, JobEvents>>({});
   const [times, setTimes] = useState<Record<number, number>>({});
   const [error, setError] = useState<string | null>(null);
-  const [scannedTo, setScannedTo] = useState<number | null>(null);
-  const [fromBlock, setFromBlock] = useState<number | null>(null);
+  const [range, setRange] = useState<{ from: number; to: number } | null>(null);
   const cursor = useRef<number | null>(null);
+  const first = useRef<number | null>(null);
   const running = useRef(false);
-  const timesRef = useRef<Record<number, number>>({});
+  const store = useRef<Record<number, JobEvents>>({});
+  const timeStore = useRef<Record<number, number>>({});
 
   useEffect(() => {
-    const leash = dep?.leashMUSD;
-    if (!leash || latestBlock === null || running.current) return;
-    const start = cursor.current ?? (dep.deployBlock ?? Math.max(0, latestBlock - LOG_RANGE));
-    if (cursor.current === null) setFromBlock(start);
+    if (!contract || latestBlock === null || running.current) return;
+    const start = cursor.current ?? deployBlock ?? Math.max(0, latestBlock - LOG_RANGE);
+    if (first.current === null) first.current = start;
     if (start > latestBlock) return;
     running.current = true;
     (async () => {
       try {
         const windows: Array<[number, number]> = [];
         for (let a = start; a <= latestBlock; a += LOG_RANGE + 1) windows.push([a, Math.min(a + LOG_RANGE, latestBlock)]);
-        const found: FeedItem[] = [];
+        const logs: RpcLog[] = [];
         for (let i = 0; i < windows.length; i += 4) {
           const batch = await Promise.all(
             windows.slice(i, i + 4).map(([a, b]) =>
               rpc<RpcLog[]>('eth_getLogs', [
-                { address: leash, fromBlock: toHex(a), toBlock: toHex(b), topics: [[TOPIC.paymentReleased, TOPIC.troveGuardSet]] },
+                {
+                  address: contract,
+                  fromBlock: toHex(a),
+                  toBlock: toHex(b),
+                  topics: [[TOPIC.jobOpened, TOPIC.jobDelivered, TOPIC.jobDisputed, TOPIC.jobReleased, TOPIC.jobClawedBack]],
+                },
               ])
             )
           );
-          for (const logs of batch) for (const l of logs) {
-            const it = decodeLog(l);
-            if (it) found.push(it);
-          }
+          batch.forEach((b) => logs.push(...b));
         }
+        const next = { ...store.current };
+        for (const l of logs) {
+          const id = Number(BigInt(l.topics[1] ?? '0x0'));
+          const ev: Ev = { tx: l.transactionHash, block: Number(l.blockNumber) };
+          const j: JobEvents = { ...(next[id] ?? {}) };
+          if (l.topics[0] === TOPIC.jobOpened)
+            j.opened = { ...ev, amountCents: word(l.data, 0), deadline: Number(word(l.data, 1)), taskHash: wordHex(l.data, 2) };
+          else if (l.topics[0] === TOPIC.jobDelivered) {
+            let uri = '';
+            try {
+              uri = abiString(l.data, 1);
+            } catch {
+              uri = '';
+            }
+            j.delivered = { ...ev, resultHash: wordHex(l.data, 0), uri };
+          } else if (l.topics[0] === TOPIC.jobDisputed) j.disputed = { ...ev, reasonHash: wordHex(l.data, 0) };
+          else if (l.topics[0] === TOPIC.jobReleased) j.released = { ...ev, amountWei: word(l.data, 0) };
+          else if (l.topics[0] === TOPIC.jobClawedBack) j.clawed = { ...ev, amountWei: word(l.data, 0), slashed: word(l.data, 1) };
+          next[id] = j;
+        }
+        store.current = next;
         cursor.current = latestBlock + 1;
-        setScannedTo(latestBlock);
+        setEvents(next);
+        setRange({ from: first.current ?? start, to: latestBlock });
         setError(null);
-        if (found.length) {
-          setItems((prev) => {
-            const seen = new Set(prev.map((p) => p.key));
-            return [...prev, ...found.filter((f) => !seen.has(f.key))].sort((x, y) => y.block - x.block || (x.key < y.key ? 1 : -1));
-          });
-          // Block times for what the feed shows (newest 30), each block fetched once.
-          const want = Array.from(new Set(found.map((f) => f.block)))
-            .sort((a, b) => b - a)
-            .slice(0, 30)
-            .filter((n) => timesRef.current[n] === undefined);
-          const blocks = await Promise.all(want.map((n) => rpc<{ timestamp: string } | null>('eth_getBlockByNumber', [toHex(n), false])));
+        const want = Array.from(new Set(logs.map((l) => Number(l.blockNumber))))
+          .sort((a, b) => b - a)
+          .slice(0, 80)
+          .filter((n) => timeStore.current[n] === undefined);
+        if (want.length) {
+          const blocks = await Promise.all(
+            want.map((n) => rpc<{ timestamp: string } | null>('eth_getBlockByNumber', [toHex(n), false], undefined, false).catch(() => null))
+          );
           blocks.forEach((b, i) => {
-            if (b) timesRef.current[want[i]] = Number(b.timestamp);
+            if (b) timeStore.current[want[i]] = Number(b.timestamp);
           });
-          setTimes({ ...timesRef.current });
+          setTimes({ ...timeStore.current });
         }
       } catch (e) {
         setError(String((e as Error)?.message ?? e));
@@ -237,10 +293,12 @@ function useFeed(dep: Deployment | null, latestBlock: number | null) {
         running.current = false;
       }
     })();
-  }, [dep, latestBlock]);
+  }, [contract, deployBlock, latestBlock]);
 
-  return { items, times, error, scannedTo, fromBlock };
+  return { events, times, error, range };
 }
+
+type Receipts = Record<string, TxRecord['status']>;
 
 type TxRecord = { key: string; label: string; hash: string; note?: string; status?: 'success' | 'reverted' | 'pending' | 'error'; block?: number };
 
@@ -254,13 +312,19 @@ function useRecordedTxs(dep: Deployment | null) {
   useEffect(() => {
     if (!dep) return;
     const list: TxRecord[] = Object.entries(dep.txs)
-      .map(([key, v]) => (typeof v === 'string' ? { key, label: humanize(key), hash: v } : v && typeof v === 'object' ? { key, label: v.label ?? humanize(key), hash: v.hash, note: v.note } : null))
+      .map(([key, v]) =>
+        typeof v === 'string'
+          ? { key, label: humanize(key), hash: v }
+          : v && typeof v === 'object'
+            ? { key, label: v.label ?? humanize(key), hash: v.hash, note: v.note }
+            : null
+      )
       .filter((t): t is TxRecord => !!t && /^0x[0-9a-fA-F]{64}$/.test(t.hash));
     setTxs(list);
     let live = true;
     Promise.all(
       list.map((t) =>
-        rpc<{ status: string; blockNumber: string } | null>('eth_getTransactionReceipt', [t.hash])
+        rpc<{ status: string; blockNumber: string } | null>('eth_getTransactionReceipt', [t.hash], undefined, false)
           .then((r): TxRecord => (r ? { ...t, status: r.status === '0x1' ? 'success' : 'reverted', block: Number(r.blockNumber) } : { ...t, status: 'pending' }))
           .catch((): TxRecord => ({ ...t, status: 'error' }))
       )
@@ -272,95 +336,20 @@ function useRecordedTxs(dep: Deployment | null) {
   return txs;
 }
 
-/* ------------------------------------------------------------------ pieces */
-
-type Tone = 'slack' | 'taut' | 'snap' | 'idle';
-
-function toneOf(live: Live | null): Tone {
-  if (!live?.trove) return 'idle';
-  const { status, icr } = live.trove;
-  const floor = live.floor ?? BigInt(0);
-  if (status !== 1) return floor > BigInt(0) ? 'snap' : 'idle';
-  const line = floor > BigInt(0) ? floor : MCR;
-  if (icr < line) return 'snap';
-  if (icr < (line * BigInt(110)) / BigInt(100)) return 'taut';
-  return 'slack';
+/** Seconds of chain time, ticking every second between reads. */
+function useChainNow(board: Board | null) {
+  const [now, setNow] = useState<number | null>(null);
+  useEffect(() => {
+    if (!board) return;
+    const tick = () => setNow(board.blockTs + Math.floor((Date.now() - board.readAtMs) / 1000));
+    tick();
+    const t = setInterval(tick, 1000);
+    return () => clearInterval(t);
+  }, [board]);
+  return now;
 }
 
-function TensionGauge({ live, deployed }: { live: Live | null; deployed: boolean }) {
-  const icr = live?.trove && live.trove.status === 1 ? live.trove.icr : null;
-  const floor = live?.floor && live.floor > BigInt(0) ? live.floor : null;
-  const icrN = icr !== null ? (icr >= ICR_UNBOUNDED ? Infinity : fromE18(icr)) : null;
-  const floorN = floor !== null ? fromE18(floor) : null;
-  const mcrN = 1.1;
-  const want = Math.max(2, Number.isFinite(icrN ?? 0) ? (icrN ?? 0) * 1.12 : 0, (floorN ?? 0) * 1.4);
-  const maxN = Math.min(4, Math.ceil(want * 2) / 2);
-  const pos = (x: number) => Math.max(0, Math.min(100, ((x - 1) / (maxN - 1)) * 100));
-  const ticks: number[] = [];
-  for (let t = 1; t <= maxN + 1e-9; t += maxN > 3 ? 1 : 0.5) ticks.push(t);
-  const tone = toneOf(live);
-  const offScale = icrN !== null && icrN > maxN;
-  const label =
-    icrN === null
-      ? deployed
-        ? 'No active trove to measure'
-        : 'Not deployed on Mezo testnet yet'
-      : `ICR ${icrN === Infinity ? 'unbounded' : `${(icrN * 100).toFixed(1)}%`}${floorN ? `, guard floor ${(floorN * 100).toFixed(0)}%` : ', guard off'}, Mezo MCR 110%`;
-
-  return (
-    <figure className="mz-gauge" data-tone={tone} aria-label={`Leash tension: ${label}`}>
-      <div className="mz-gauge-track" role="img" aria-label={label}>
-        <span className="mz-zone mz-zone-liq" style={{ left: 0, width: `${pos(mcrN)}%` }} />
-        {(icrN !== null || floorN !== null) && (
-          <span className="mz-zone mz-zone-slack" style={{ left: `${pos(floorN ?? mcrN)}%`, right: 0 }} />
-        )}
-        {floorN !== null && <span className="mz-zone mz-zone-taut" style={{ left: `${pos(mcrN)}%`, width: `${pos(floorN) - pos(mcrN)}%` }} />}
-        {icrN !== null && <span className="mz-gauge-cord" style={{ width: `${pos(Math.min(icrN, maxN))}%` }} />}
-        <span className="mz-line mz-line-mcr" style={{ left: `${pos(mcrN)}%` }} />
-        {floorN !== null && <span className="mz-line mz-line-floor" style={{ left: `${pos(floorN)}%` }} />}
-        {icrN !== null && (
-          <span className="mz-knot" style={{ left: `${pos(Math.min(icrN, maxN))}%` }} data-off={offScale || undefined} />
-        )}
-      </div>
-      <div className="mz-gauge-marks" aria-hidden="true">
-        <span className="mz-mark mz-mark-mcr" style={{ left: `${pos(mcrN)}%` }}>
-          MCR 110%
-        </span>
-        {floorN !== null && (
-          <span className="mz-mark mz-mark-floor" style={{ left: `${pos(floorN)}%` }}>
-            Guard {(floorN * 100).toFixed(0)}%
-          </span>
-        )}
-      </div>
-      <ol className="mz-gauge-scale" aria-hidden="true">
-        {ticks.map((t) => (
-          <li key={t} style={{ left: `${pos(t)}%` }}>
-            {(t * 100).toFixed(0)}%
-          </li>
-        ))}
-      </ol>
-      <figcaption className="mz-gauge-legend">
-        <span>
-          <i className="mz-key mz-key-liq" /> Below 110%: Mezo liquidation zone
-        </span>
-        <span>
-          <i className="mz-key mz-key-taut" /> Under the guard: LeashMUSD refuses to pay
-        </span>
-        {offScale && <span className="mz-off">ICR is beyond the scale shown</span>}
-      </figcaption>
-    </figure>
-  );
-}
-
-function Stat({ label, children, note }: { label: string; children: React.ReactNode; note?: React.ReactNode }) {
-  return (
-    <div className="mz-stat">
-      <dt>{label}</dt>
-      <dd>{children}</dd>
-      {note && <p>{note}</p>}
-    </div>
-  );
-}
+/* ------------------------------------------------------------------ small pieces */
 
 function NotDeployed({ children = 'Not deployed on Mezo testnet yet' }: { children?: React.ReactNode }) {
   return <span className="mz-nd">{children}</span>;
@@ -376,6 +365,250 @@ function ExtLink({ href, children, className = '' }: { href: string; children: R
   );
 }
 
+function fmtDuration(s: number) {
+  const v = Math.max(0, Math.floor(s));
+  const d = Math.floor(v / 86400);
+  const h = Math.floor((v % 86400) / 3600);
+  const m = Math.floor((v % 3600) / 60);
+  const sec = v % 60;
+  if (d) return `${d}d ${h}h`;
+  if (h) return `${h}h ${m}m`;
+  if (m) return `${m}m ${sec.toString().padStart(2, '0')}s`;
+  return `${sec}s`;
+}
+
+
+/* ------------------------------------------------------------------ job card */
+
+/** An answer as written; a long integer is also read as an 18-decimal token amount, to make it legible. */
+function Answer({ value }: { value: string }) {
+  const big = /^\d{19,}$/.test(value);
+  return (
+    <span className="mz-answer">
+      <span className="mono">{value}</span>
+      {big && <small>= {fmtToken(BigInt(value), 2)} at 18 decimals</small>}
+    </span>
+  );
+}
+
+type Outcome = 'pending' | 'delivered' | 'disputed' | 'paid' | 'clawed' | 'unknown';
+const outcomeOf = (status: number): Outcome =>
+  status === 1 ? 'pending' : status === 2 ? 'delivered' : status === 3 ? 'disputed' : status === 4 ? 'paid' : status === 5 ? 'clawed' : 'unknown';
+
+const STATUS_LABEL: Record<Outcome, string> = {
+  pending: 'Awaiting delivery',
+  delivered: 'Delivered',
+  disputed: 'Disputed',
+  paid: 'Paid',
+  clawed: 'Clawed back',
+  unknown: 'Unknown',
+};
+
+const ReceiptsCtx = React.createContext<Receipts>({});
+
+function Step({
+  state,
+  label,
+  ev,
+  times,
+  detail,
+}: {
+  state: 'done' | 'now' | 'todo' | 'miss' | 'paid' | 'clawed';
+  label: string;
+  ev?: Ev;
+  times: Record<number, number>;
+  detail?: React.ReactNode;
+}) {
+  const receipts = React.useContext(ReceiptsCtx);
+  const rx = ev ? receipts[ev.tx.toLowerCase()] : undefined;
+  const ts = ev ? times[ev.block] : undefined;
+  const when = ts ? new Date(ts * 1000).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : null;
+  return (
+    <li className="mz-step" data-state={state}>
+      <i aria-hidden="true" />
+      <div>
+        <b>{label}</b>
+        {detail && <span className="mz-step-detail">{detail}</span>}
+        {ev && (
+          <span className="mz-step-tx">
+            <ExtLink href={txUrl(ev.tx)} className="mono">
+              <span title={ts ? new Date(ts * 1000).toLocaleString() : undefined}>{when ?? `block ${ev.block.toLocaleString('en-US')}`}</span>
+            </ExtLink>
+            {rx === 'success' && <span className="mz-rx-ok">receipt status 1</span>}
+          </span>
+        )}
+      </div>
+    </li>
+  );
+}
+
+function JobCard({
+  job,
+  ev,
+  note,
+  times,
+  now,
+  disputeWindow,
+  arbiter,
+}: {
+  job: Job;
+  ev: JobEvents;
+  note?: JobNote;
+  times: Record<number, number>;
+  now: number | null;
+  disputeWindow: number | null;
+  arbiter: string | null;
+}) {
+  const o = outcomeOf(job.status);
+  const delivered = job.deliveredAt > 0 || !!ev.delivered;
+  const resultHash = job.resultHash !== ZERO32 ? job.resultHash : ev.delivered?.resultHash ?? null;
+  const windowEnd = job.deliveredAt && disputeWindow !== null ? job.deliveredAt + disputeWindow : null;
+
+  let clock: React.ReactNode = null;
+  if (o === 'pending' && now !== null)
+    clock =
+      now <= job.deadline ? (
+        <>
+          Deadline in <b>{fmtDuration(job.deadline - now)}</b>
+        </>
+      ) : (
+        <>
+          <b>Deadline passed.</b> Anyone can claw this back now.
+        </>
+      );
+  else if (o === 'delivered' && now !== null && windowEnd !== null)
+    clock =
+      now <= windowEnd ? (
+        <>
+          Dispute window closes in <b>{fmtDuration(windowEnd - now)}</b>
+        </>
+      ) : (
+        <>
+          <b>Window closed.</b> Anyone can release the payment.
+        </>
+      );
+  else if (o === 'disputed')
+    clock = <>The policy&rsquo;s arbiter{arbiter ? ` ${short(arbiter)}` : ''} decides: pay the provider, or claw back and slash.</>;
+
+  const releasedBy = ev.released
+    ? ev.disputed
+      ? 'Arbiter released it'
+      : windowEnd !== null && times[ev.released.block] !== undefined && times[ev.released.block] <= windowEnd
+        ? 'Owner accepted'
+        : 'Released after the window'
+    : null;
+  const clawReason = ev.disputed ? 'Arbiter upheld the dispute' : !delivered ? 'Missed the deadline' : null;
+
+  return (
+    <article className="mz-job" data-outcome={o} aria-labelledby={`job-${job.id}`}>
+      {o === 'clawed' && (
+        <div className="mz-stamp" aria-hidden="true">
+          Clawed back
+        </div>
+      )}
+      <header className="mz-job-top">
+        <h3 id={`job-${job.id}`}>Job #{job.id}</h3>
+        <span className="mz-chip" data-outcome={o}>
+          {STATUS_LABEL[o]}
+        </span>
+      </header>
+
+      <div className="mz-job-amount">
+        <b>{fmtMusd(job.amountCents * CENT_WEI)}</b> MUSD
+        <small>{job.amountCents.toString()} cents · provider <ExtLink href={addressUrl(job.provider)} className="mono">{short(job.provider)}</ExtLink></small>
+      </div>
+
+      <dl className="mz-job-io">
+        <div>
+          <dt>Task</dt>
+          <dd>
+            {note?.task ? <q>{note.task}</q> : null}
+            <span className="mono mz-hash" title={job.taskHash}>
+              {note?.task ? 'hash ' : ''}
+              {short(job.taskHash, 10, 8)}
+            </span>
+          </dd>
+        </div>
+        <div>
+          <dt>Result</dt>
+          <dd>
+            {note?.answer ? <Answer value={note.answer} /> : null}
+            {resultHash ? (
+              <span className="mono mz-hash" title={resultHash}>
+                {note?.answer ? 'hash ' : ''}
+                {short(resultHash, 10, 8)}
+              </span>
+            ) : (
+              <span className="mz-muted">{o === 'clawed' || (o === 'pending' && now !== null && now > job.deadline) ? 'Never delivered' : 'Not delivered yet'}</span>
+            )}
+            {ev.delivered?.uri && <span className="mono mz-hash">uri {ev.delivered.uri}</span>}
+          </dd>
+        </div>
+        {note?.correct && (
+          <div>
+            <dt>Correct</dt>
+            <dd>
+              <Answer value={note.correct} />
+              <span className="mz-note-src">the arbiter&rsquo;s re-check, from the run&rsquo;s notes</span>
+            </dd>
+          </div>
+        )}
+        {note?.verdict && (
+          <div>
+            <dt>Verdict</dt>
+            <dd>
+              {note.verdict}
+              <span className="mz-note-src">note from the run, off-chain</span>
+            </dd>
+          </div>
+        )}
+      </dl>
+
+      {o === 'clawed' && (
+        <div className="mz-claw">
+          <p>
+            <b>+{fmtMusd(ev.clawed?.amountWei ?? job.amountCents * CENT_WEI)} MUSD</b> back to the owner&rsquo;s escrow
+          </p>
+          <p>
+            <b>{ev.clawed ? `${fmtToken(ev.clawed.slashed, 4)} MEZO` : '—'}</b> slashed from the provider&rsquo;s bond
+          </p>
+          {clawReason && <p className="mz-claw-why">{clawReason}</p>}
+        </div>
+      )}
+      {o === 'paid' && (
+        <div className="mz-paid">
+          <b>{fmtMusd(ev.released?.amountWei ?? job.amountCents * CENT_WEI)} MUSD</b> paid to the provider
+          {releasedBy && <span> · {releasedBy}</span>}
+        </div>
+      )}
+      {clock && (
+        <p className="mz-clock" role="timer" aria-live="off">
+          {clock}
+        </p>
+      )}
+
+      <ol className="mz-steps-line" aria-label={`Job ${job.id} lifecycle`}>
+        <Step state="done" label="Opened" ev={ev.opened} times={times} detail="ZK-proven payment held in escrow" />
+        {delivered ? (
+          <Step state="done" label="Delivered" ev={ev.delivered} times={times} />
+        ) : o === 'clawed' || (now !== null && now > job.deadline) ? (
+          <Step state="miss" label="No delivery" times={times} detail="deadline missed" />
+        ) : (
+          <Step state="now" label="Delivery" times={times} detail="due before the deadline" />
+        )}
+        {(ev.disputed || o === 'disputed') && <Step state={o === 'disputed' ? 'now' : 'done'} label="Disputed" ev={ev.disputed} times={times} />}
+        {o === 'paid' ? (
+          <Step state="paid" label="Paid" ev={ev.released} times={times} />
+        ) : o === 'clawed' ? (
+          <Step state="clawed" label="Clawed back" ev={ev.clawed} times={times} />
+        ) : (
+          <Step state="todo" label="Paid or clawed back" times={times} />
+        )}
+      </ol>
+    </article>
+  );
+}
+
 /* ------------------------------------------------------------------ sections */
 
 function Hero({ hasHero }: { hasHero: boolean }) {
@@ -384,18 +617,18 @@ function Hero({ hasHero }: { hasHero: boolean }) {
       <div className="lz-wrap mz-hero-inner">
         <div className="mz-hero-copy">
           <p className="mz-kicker">
-            <span>LEASH</span> on <span>Mezo</span> · Bitcoin-backed MUSD
+            <span>LEASH</span> on <span>Mezo</span> · pay on delivery in MUSD
           </p>
           <h1 className="mz-h1">
-            Bitcoin credit for AI agents. <em>On a leash.</em>
+            AI agents get paid in MUSD. <em>Bad work gets clawed back.</em>
           </h1>
           <p className="mz-lead">
-            Borrow MUSD against your BTC, then let an agent spend it only with zero-knowledge proofs, and only while
-            your trove stays healthy.
+            Your agent hires other agents on Mezo. Payment waits in escrow until the work is delivered: miss the deadline
+            or return a wrong answer, and the MUSD comes back to you, plus a slice of the provider&rsquo;s MEZO bond.
           </p>
           <div className="lz-cta">
-            <a className="btn btn-dark" href="#live">
-              See the live leash <ArrowDown aria-hidden="true" />
+            <a className="btn btn-dark" href="#jobs">
+              See the live jobs <ArrowDown aria-hidden="true" />
             </a>
             <a className="btn btn-line" href={REPO_URL} target="_blank" rel="noreferrer">
               GitHub <ArrowUpRight aria-hidden="true" />
@@ -409,300 +642,188 @@ function Hero({ hasHero }: { hasHero: boolean }) {
   );
 }
 
-function LivePanel({ dep, depError }: { dep: Deployment | null; depError: string | null }) {
+function Stat({ label, value, note }: { label: string; value: React.ReactNode; note?: React.ReactNode }) {
+  return (
+    <div className="mz-stat">
+      <dt>{label}</dt>
+      <dd>{value}</dd>
+      {note && <p>{note}</p>}
+    </div>
+  );
+}
+
+function JobsBoard({ dep, depError }: { dep: Deployment | null; depError: string | null }) {
   const ready = dep !== null || depError !== null;
-  const { live, error, busy, refresh } = useLiveLeash(dep, ready);
-  const deployed = !!dep?.leashMUSD;
-  const tone = toneOf(live);
-  const floor = live?.floor ?? null;
-  const trove = live?.trove ?? null;
-  const icrActive = trove && trove.status === 1;
-  const unbounded = icrActive && trove.icr >= ICR_UNBOUNDED;
+  const { board, error, busy, refresh } = useBoard(dep, ready);
+  const contract = dep?.leashClawback ?? null;
+  const { events, times, error: logError, range } = useJobEvents(contract, dep?.deployBlock ?? null, board?.deployed ? board.block : null);
+  const now = useChainNow(board);
+  const deployed = !!contract;
 
-  let verdict: React.ReactNode = null;
-  if (!deployed) verdict = 'LeashMUSD is not on Mezo testnet yet, so there is no owner trove or escrow to read. The BTC price and the MCR line are live.';
-  else if (!dep?.owner) verdict = 'The owner address is not set in deployment.json yet.';
-  else if (trove && floor !== null) {
-    if (floor === BigInt(0)) verdict = 'Guard off: payments from this policy do not check the trove.';
-    else if (!icrActive) verdict = `Trove ${TROVE_STATUS[trove.status] ?? `status ${trove.status}`}: LeashMUSD reverts every payment with TroveNotActive(owner).`;
-    else if (tone === 'snap') verdict = 'Snapped: the ICR is under the guard, so LeashMUSD reverts with TroveBelowLeash(owner, icr, floor).';
-    else if (tone === 'taut') verdict = 'Taut: within 10% of the guard floor. Payments still clear, but not for long if BTC keeps falling.';
-    else verdict = 'Slack: the trove clears the guard, so a valid proof can release MUSD.';
-  } else if (trove && !icrActive) verdict = `Trove ${TROVE_STATUS[trove.status] ?? `status ${trove.status}`}.`;
-
-  // ICR scales linearly with price (collateral x price / debt), so the price where the leash snaps follows.
-  const snapPrice = live && icrActive && !unbounded && floor && floor > BigInt(0) ? (live.price * floor) / trove.icr : null;
-  const liqPrice = live && icrActive && !unbounded ? (live.price * MCR) / trove.icr : null;
+  const all = Object.values(events);
+  const paid = all.filter((e) => e.released).length;
+  const clawed = all.filter((e) => e.clawed);
+  const returned = clawed.reduce((s, e) => s + (e.clawed?.amountWei ?? BigInt(0)), BigInt(0));
+  const slashed = clawed.reduce((s, e) => s + (e.clawed?.slashed ?? BigInt(0)), BigInt(0));
+  const logsReady = range !== null && !logError;
+  const skel = <span className="mz-skel" />;
+  // Seven 'not deployed' badges would shout; the board below says it once.
+  const nd = (
+    <span className="mz-dash">
+      —<span className="sr-only"> not deployed yet</span>
+    </span>
+  );
+  const fromLogs = (v: React.ReactNode) => (!deployed ? nd : logsReady ? v : logError ? 'Unavailable' : skel);
+  const notes = new Map((dep?.jobs ?? []).map((n) => [n.jobId, n]));
 
   return (
-    <section className="mz-live" id="live" aria-labelledby="live-h">
+    <section className="mz-live" id="jobs" aria-labelledby="jobs-h">
       <div className="lz-wrap">
         <div className="mz-sec-head">
           <div>
             <p className="lz-num">Live from Mezo testnet · chain {MEZO.chainId}</p>
-            <h2 className="lz-h2" id="live-h">
-              The leash, read live.
+            <h2 className="lz-h2" id="jobs-h">
+              The jobs board, read live.
             </h2>
           </div>
           <p className="mz-sec-sub">
-            Straight from <span className="mono">rpc.test.mezo.org</span> in your browser: Mezo&rsquo;s PriceFeed, the
-            owner&rsquo;s trove through LeashMUSD, and the policy escrow. Every read is pinned to one block.
+            Read in your browser from <span className="mono">rpc.test.mezo.org</span>: each job&rsquo;s state from
+            LeashClawback&rsquo;s storage, its history from the contract&rsquo;s events. Nothing here is recorded or
+            replayed.
           </p>
         </div>
 
-        <div className="mz-panel" data-tone={tone}>
-          <div className="mz-panel-top">
-            <div className="mz-pill" data-state={error ? 'error' : live ? 'live' : 'loading'} role="status" aria-live="polite">
-              <i aria-hidden="true" />
-              {error ? 'RPC error' : live ? `Live · block ${live.block.toLocaleString('en-US')}` : 'Reading Mezo testnet…'}
-            </div>
-            <button type="button" className="btn btn-ghost-light btn-sm mz-refresh" aria-label="Refresh now" onClick={refresh} disabled={busy || !ready}>
-              <RefreshCw aria-hidden="true" className={busy ? 'mz-spin' : ''} />
-              <span className="mz-refresh-label">Refresh</span>
-            </button>
+        <div className="mz-board-top">
+          <div className="mz-pill" data-state={error ? 'error' : board ? 'live' : 'loading'} role="status" aria-live="polite">
+            <i aria-hidden="true" />
+            {error ? 'RPC error' : board ? `Live · block ${board.block.toLocaleString('en-US')}` : 'Reading Mezo testnet…'}
           </div>
-
-          {(error || depError) && (
-            <div role="alert" className="mz-alert">
-              {depError && <p>Could not load the LEASH deployment record: {depError}</p>}
-              {error && (
-                <p>
-                  {error}
-                  {live ? ` Showing block ${live.block.toLocaleString('en-US')} from ${live.readAt.toLocaleTimeString()}.` : ''}
-                </p>
-              )}
-            </div>
+          {board && (
+            <span className="mz-btc">
+              BTC <b>{fmtUsd(fromE18(board.price))}</b> <span>Mezo PriceFeed</span>
+            </span>
           )}
+          <button type="button" className="btn btn-ghost-light btn-sm mz-refresh" aria-label="Refresh now" onClick={refresh} disabled={busy || !ready}>
+            <RefreshCw aria-hidden="true" className={busy ? 'mz-spin' : ''} />
+            <span className="mz-refresh-label">Refresh</span>
+          </button>
+        </div>
 
-          <div className="mz-panel-grid">
-            <div className="mz-icr">
-              <p className="mz-label">Owner trove ICR</p>
-              {!deployed ? (
-                <>
-                  <p className="mz-icr-num is-empty is-none" aria-label="No trove ICR: not deployed">
-                    —
-                  </p>
-                  <NotDeployed />
-                </>
-              ) : !live ? (
-                <p className="mz-icr-num is-empty" aria-label="Loading">
-                  <span className="mz-skel" />
-                </p>
-              ) : !trove ? (
-                <p className="mz-icr-num is-empty is-none">—</p>
-              ) : icrActive ? (
-                <p className="mz-icr-num" data-tone={tone}>
-                  {unbounded ? 'No debt' : fmtPct(trove.icr)}
-                </p>
-              ) : (
-                <p className="mz-icr-num is-empty" data-tone={tone}>
-                  Inactive
-                </p>
-              )}
-              {verdict && <p className="mz-verdict">{verdict}</p>}
-              {dep?.owner && (
-                <p className="mz-owner">
-                  Owner <ExtLink href={addressUrl(dep.owner)}>{short(dep.owner)}</ExtLink>
-                </p>
-              )}
-            </div>
-
-            <dl className="mz-stats">
-              <Stat label="BTC price" note="Mezo PriceFeed.fetchPrice()">
-                {live ? fmtUsd(fromE18(live.price)) : error ? 'Unavailable' : <span className="mz-skel" />}
-              </Stat>
-              <Stat label="Policy escrow" note={deployed ? 'LeashMUSD.policyBalance' : undefined}>
-                {!deployed ? (
-                  <NotDeployed />
-                ) : !dep?.policyCommitment ? (
-                  <NotDeployed>Policy not set</NotDeployed>
-                ) : live?.balance != null ? (
-                  <>
-                    {fmtMusd(live.balance)} <small>MUSD</small>
-                  </>
-                ) : (
-                  <span className="mz-skel" />
-                )}
-              </Stat>
-              <Stat label="Guard floor" note={deployed ? 'LeashMUSD.minTroveICR' : 'Must be ≥ Mezo’s 110% MCR'}>
-                {!deployed ? (
-                  <NotDeployed />
-                ) : !dep?.policyCommitment ? (
-                  <NotDeployed>Policy not set</NotDeployed>
-                ) : floor != null ? (
-                  floor === BigInt(0) ? (
-                    'Off'
-                  ) : (
-                    fmtPct(floor, 0)
-                  )
-                ) : (
-                  <span className="mz-skel" />
-                )}
-              </Stat>
-            </dl>
-          </div>
-
-          <TensionGauge live={live} deployed={deployed} />
-
-          <div className="mz-panel-foot">
-            <p>
-              {live ? (
-                <>
-                  Last read at block{' '}
-                  <a href={blockUrl(live.block)} target="_blank" rel="noreferrer" className="mono">
-                    {live.block.toLocaleString('en-US')}
-                  </a>
-                  , {live.readAt.toLocaleTimeString()} · refreshes every 15 s
-                </>
-              ) : (
-                'Waiting for the first read…'
-              )}
-            </p>
-            {snapPrice !== null && liqPrice !== null && (
-              <p className="mz-derived">
-                {tone === 'snap' ? 'Leash slackens again above BTC' : 'Leash snaps below BTC'} <b>{fmtUsd(fromE18(snapPrice), 0)}</b> ·{' '}
-                {trove && trove.icr < MCR ? 'back above the MCR at' : 'MCR crossed below'} <b>{fmtUsd(fromE18(liqPrice), 0)}</b>
-                <span> (price × line ÷ ICR, at this block)</span>
-              </p>
-            )}
-            {live && (
-              <p className="mz-derived">
-                MUSD in circulation: <b>{fmtMusd(live.musdSupply)}</b>
+        {(error || depError) && (
+          <div role="alert" className="mz-alert">
+            {depError && <p>Could not load the LEASH deployment record: {depError}</p>}
+            {error && (
+              <p>
+                {error}
+                {board ? ` Showing block ${board.block.toLocaleString('en-US')} from ${new Date(board.readAtMs).toLocaleTimeString()}.` : ''}
               </p>
             )}
           </div>
-        </div>
-      </div>
-    </section>
-  );
-}
+        )}
 
-function PaymentsFeed({ dep, latestBlock }: { dep: Deployment | null; latestBlock: number | null }) {
-  const { items, times, error, scannedTo, fromBlock } = useFeed(dep, latestBlock);
-  const deployed = !!dep?.leashMUSD;
-  const shown = items.slice(0, 30);
-  return (
-    <section className="lz-sec lz-paper mz-feed" id="payments" aria-labelledby="pay-h">
-      <div className="lz-wrap">
-        <div className="mz-sec-head">
-          <div>
-            <p className="lz-num">PaymentReleased · eth_getLogs</p>
-            <h2 className="lz-h2" id="pay-h">
-              Every payment the leash let through.
-            </h2>
-          </div>
-          <p className="mz-sec-sub">
-            Each row is a <span className="mono">PaymentReleased</span> event: a proof verified on-chain and the
-            trove&rsquo;s ICR at that moment. Guard changes are listed too.
-          </p>
-        </div>
+        <dl className="mz-strip" aria-label="Totals">
+          <Stat label="Jobs opened" value={!deployed ? nd : board?.jobCount != null ? board.jobCount : skel} />
+          <Stat label="Paid" value={fromLogs(paid)} />
+          <Stat label="Clawed back" value={fromLogs(clawed.length)} />
+          <Stat
+            label="MUSD returned"
+            value={fromLogs(fmtMusd(returned))}
+            note={deployed ? 'to owners, by clawbacks' : undefined}
+          />
+          <Stat label="MEZO slashed" value={fromLogs(fmtToken(slashed, 4))} note={deployed ? 'from provider bonds' : undefined} />
+          <Stat
+            label="Owner escrow"
+            value={!deployed ? nd : !dep?.owner || !dep.policyCommitment ? <span className="mz-dash">not set</span> : board?.escrow != null ? <>{fmtMusd(board.escrow)} <small>MUSD</small></> : skel}
+            note={deployed ? 'policyBalance' : undefined}
+          />
+          <Stat
+            label="Provider bond"
+            value={!deployed ? nd : !dep?.provider ? <span className="mz-dash">not set</span> : board?.bond != null ? <>{fmtToken(board.bond, 4)} <small>MEZO</small></> : skel}
+            note={board?.minBond != null ? `min ${fmtToken(board.minBond, 4)} · slash ${fmtToken(board.slashAmount ?? BigInt(0), 4)}` : undefined}
+          />
+        </dl>
 
         {!deployed ? (
-          <div className="mz-empty">
+          <div className="mz-board-empty">
             <h3>Not deployed on Mezo testnet yet</h3>
             <p>
-              Once LeashMUSD is live, the payments it releases appear here, read from the chain with{' '}
-              <span className="mono">eth_getLogs</span>. Nothing is shown until then.
+              When LeashClawback is live, every job it holds shows up here with its amount, provider, task and result
+              hashes, deadline, and how it ended. Until then there is nothing to show, so nothing is shown.
+            </p>
+            <ol className="mz-flow" aria-label="How a job moves">
+              <li>Opened</li>
+              <li>Delivered</li>
+              <li className="ok">Paid</li>
+              <li className="no">or clawed back</li>
+            </ol>
+          </div>
+        ) : !board ? (
+          <div className="mz-board-empty">
+            <h3>{error ? 'Could not read the jobs' : 'Reading the jobs…'}</h3>
+          </div>
+        ) : board.jobs.length === 0 ? (
+          <div className="mz-board-empty">
+            <h3>No jobs yet</h3>
+            <p>
+              LeashClawback at <span className="mono">{short(contract)}</span> has jobCount 0 at block{' '}
+              {board.block.toLocaleString('en-US')}.
             </p>
           </div>
         ) : (
           <>
-            {error && (
-              <div role="alert" className="mz-alert mz-alert-light">
-                Could not read the payment logs: {error}
+            <div className="mz-jobs">
+              {[...board.jobs].sort((a, b) => a.id - b.id).map((j) => (
+                <JobCard
+                  key={j.id}
+                  job={j}
+                  ev={events[j.id] ?? {}}
+                  note={notes.get(j.id)}
+                  times={times}
+                  now={now}
+                  disputeWindow={board.disputeWindow}
+                  arbiter={dep?.arbiter ?? null}
+                />
+              ))}
+            </div>
+            {logError && (
+              <div role="alert" className="mz-alert">
+                <p>Could not read the job events (tx links and totals): {logError}</p>
               </div>
-            )}
-            {shown.length === 0 ? (
-              <div className="mz-empty">
-                <h3>{scannedTo === null ? 'Reading the logs…' : 'No payments yet'}</h3>
-                <p>
-                  {scannedTo === null
-                    ? 'Scanning LeashMUSD for PaymentReleased events.'
-                    : `No PaymentReleased events from block ${fromBlock?.toLocaleString('en-US')} to ${scannedTo.toLocaleString('en-US')}.`}
-                  {dep?.deployBlock == null && scannedTo !== null ? ' deployBlock is not set, so only the last 10,000 blocks were scanned.' : ''}
-                </p>
-              </div>
-            ) : (
-              <>
-                <ol className="mz-rows" aria-label="LeashMUSD events, newest first">
-                  <li className="mz-row mz-row-head" aria-hidden="true">
-                    <span>Amount</span>
-                    <span>Payee</span>
-                    <span>Trove ICR</span>
-                    <span>When</span>
-                    <span>Tx</span>
-                  </li>
-                  {shown.map((it) => {
-                    const ts = times[it.block];
-                    const when = ts ? new Date(ts * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : null;
-                    return it.kind === 'payment' ? (
-                      <li key={it.key} className="mz-row">
-                        <span className="mz-cell" data-label="Amount">
-                          <b>{fmtMusd((it.amountCents ?? BigInt(0)) * CENT_WEI)} MUSD</b>
-                          <small>{it.amountCents?.toString()} cents</small>
-                        </span>
-                        <span className="mz-cell" data-label="Payee">
-                          <ExtLink href={addressUrl(it.recipient!)} className="mono">
-                            {short(it.recipient!)}
-                          </ExtLink>
-                        </span>
-                        <span className="mz-cell" data-label="Trove ICR">
-                          {it.icr === BigInt(0) ? <span className="mz-muted">guard off</span> : it.icr! >= ICR_UNBOUNDED ? 'no debt' : fmtPct(it.icr!)}
-                        </span>
-                        <span className="mz-cell" data-label="When">
-                          {when ?? <span className="mz-muted">block {it.block.toLocaleString('en-US')}</span>}
-                          {when && <small>block {it.block.toLocaleString('en-US')}</small>}
-                        </span>
-                        <span className="mz-cell" data-label="Tx">
-                          <ExtLink href={txUrl(it.txHash)} className="mono">
-                            {short(it.txHash, 8, 6)}
-                          </ExtLink>
-                        </span>
-                      </li>
-                    ) : (
-                      <li key={it.key} className="mz-row mz-row-guard">
-                        <span className="mz-cell mz-cell-wide" data-label="Guard">
-                          <b>Guard floor set to {it.floor === BigInt(0) ? 'off' : fmtPct(it.floor!, 0)}</b>
-                          <small>TroveGuardSet · policy {short(it.policyId, 8, 6)}</small>
-                        </span>
-                        <span className="mz-cell" data-label="When">
-                          {when ?? <span className="mz-muted">block {it.block.toLocaleString('en-US')}</span>}
-                          {when && <small>block {it.block.toLocaleString('en-US')}</small>}
-                        </span>
-                        <span className="mz-cell" data-label="Tx">
-                          <ExtLink href={txUrl(it.txHash)} className="mono">
-                            {short(it.txHash, 8, 6)}
-                          </ExtLink>
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ol>
-                {scannedTo !== null && (
-                  <p className="lz-fine">
-                    {items.length} event{items.length === 1 ? '' : 's'} from block {fromBlock?.toLocaleString('en-US')} to{' '}
-                    {scannedTo.toLocaleString('en-US')}
-                    {items.length > shown.length ? `; the newest ${shown.length} are shown` : ''}.
-                  </p>
-                )}
-              </>
             )}
           </>
         )}
+
+        <p className="mz-board-foot">
+          {board ? (
+            <>
+              Last read at block{' '}
+              <a href={blockUrl(board.block)} target="_blank" rel="noreferrer" className="mono">
+                {board.block.toLocaleString('en-US')}
+              </a>
+              , {new Date(board.readAtMs).toLocaleTimeString()} · refreshes every 15 s
+              {range ? ` · events from block ${range.from.toLocaleString('en-US')}` : ''}
+              {deployed && dep?.deployBlock == null && range ? ' (deployBlock not set: last 10,000 blocks only)' : ''}
+              {board.jobCount !== null && board.jobCount > MAX_JOBS ? ` · newest ${MAX_JOBS} of ${board.jobCount} jobs shown` : ''}
+            </>
+          ) : (
+            'Waiting for the first read…'
+          )}
+        </p>
       </div>
     </section>
   );
 }
 
 const STEPS: Array<[string, string]> = [
-  ['Borrow MUSD against BTC', 'Open a Mezo Borrow trove with Bitcoin as collateral and mint MUSD, Mezo’s Bitcoin-backed stablecoin.'],
+  ['Borrow MUSD against BTC', 'Open a Mezo Borrow trove with Bitcoin as collateral, mint MUSD, and fund your LEASH policy escrow with it.'],
   [
-    'Fund the leash',
-    'Escrow MUSD in LeashMUSD under a hidden ZK policy (payees, per-payment cap, daily cap), and set a trove guard: the lowest collateral ratio the agent may spend at.',
+    'Your agent hires a provider',
+    'It pays with a zero-knowledge proof that the payment fits your hidden policy (payees, per-payment cap, daily cap). The MUSD moves into the job, not to the provider.',
   ],
+  ['The provider delivers', 'A bonded provider agent posts a hash of its result, and where to fetch it, before the deadline.'],
   [
-    'The agent pays with proofs',
-    'Each payment carries an UltraHonk proof verified on-chain. Before releasing MUSD, the contract reads your trove at the live BTC price. Below the guard, it refuses.',
+    'Good work is paid. Bad work is clawed back.',
+    'Accept it, or let the dispute window pass, and the provider is paid. Miss the deadline, or lose a dispute, and the MUSD returns to you with a slice of the provider’s MEZO bond.',
   ],
 ];
 
@@ -711,9 +832,9 @@ function HowItWorks() {
     <section className="lz-sec lz-cream" id="how" aria-labelledby="how-h">
       <div className="lz-wrap">
         <h2 className="lz-h2" id="how-h">
-          As BTC falls, the leash tightens on its own.
+          Pay on delivery, enforced on‑chain.
         </h2>
-        <ol className="lz-steps">
+        <ol className="lz-steps mz-steps-4">
           {STEPS.map(([title, body], i) => (
             <li key={title}>
               <span className="lz-num">0{i + 1}</span>
@@ -723,23 +844,27 @@ function HowItWorks() {
           ))}
         </ol>
         <p className="lz-fine">
-          Amounts in proofs are cents; 1 cent settles as 10<sup>16</sup> MUSD wei. The guard can&rsquo;t be set under
-          Mezo&rsquo;s 110% MCR, and the policy&rsquo;s caps and payees never leave the owner&rsquo;s device.
+          Amounts in proofs are cents; 1 cent settles as 10<sup>16</sup> MUSD wei. A provider can&rsquo;t withdraw its bond
+          while it holds open jobs, and disputes go to an arbiter the owner names when registering the policy.
         </p>
       </div>
     </section>
   );
 }
 
-function Contracts({ dep, depError }: { dep: Deployment | null; depError: string | null }) {
-  const txs = useRecordedTxs(dep);
-  const rows: Array<{ name: string; role: string; addr: string | null }> = [
-    { name: 'LeashMUSD', role: 'LEASH escrow in MUSD with the trove guard', addr: dep?.leashMUSD ?? null },
+function Contracts({ dep, depError, txs }: { dep: Deployment | null; depError: string | null; txs: TxRecord[] }) {
+  const rows: Array<{ name: string; role: string; addr: string | null; nd?: string }> = [
+    { name: 'LeashClawback', role: 'Job escrow in MUSD, MEZO bonds, clawbacks', addr: dep?.leashClawback ?? null },
     { name: 'LeashVerifier', role: 'UltraHonk verifier for the Noir policy circuit', addr: dep?.verifier ?? null },
     { name: 'MUSD', role: 'Mezo’s Bitcoin-backed stablecoin', addr: MEZO.musd },
-    { name: 'TroveManager', role: 'Mezo Borrow troves; the guard reads ICR here', addr: MEZO.troveManager },
-    { name: 'PriceFeed', role: 'BTC/USD price the guard uses', addr: MEZO.priceFeed },
-    { name: 'BorrowerOperations', role: 'Open a trove and borrow MUSD', addr: MEZO.borrowerOperations },
+    { name: 'MEZO', role: 'Mezo token; providers bond it, clawbacks slash it', addr: MEZO.mezo },
+    { name: 'BorrowerOperations', role: 'Open a trove and borrow MUSD against BTC', addr: MEZO.borrowerOperations },
+  ];
+  const parties: Array<[string, string, string | null]> = [
+    ['Policy owner', 'Borrowed the MUSD; funds the escrow, gets clawbacks and slashes', dep?.owner ?? null],
+    ['Owner’s agent', 'Relays the ZK-proven payments that open jobs', dep?.agent ?? null],
+    ['Provider', 'Bonded agent that does the work', dep?.provider ?? null],
+    ['Arbiter', 'Resolves the owner’s disputes', dep?.arbiter ?? null],
   ];
   return (
     <section className="lz-sec lz-paper" id="contracts" aria-labelledby="contracts-h">
@@ -752,7 +877,7 @@ function Contracts({ dep, depError }: { dep: Deployment | null; depError: string
             </h2>
           </div>
           <p className="mz-sec-sub">
-            Mezo&rsquo;s MUSD addresses are from the mezo-org/musd matsnet deployment. The LEASH addresses come from{' '}
+            MUSD and BorrowerOperations are from the mezo-org/musd matsnet deployment. The LEASH addresses come from{' '}
             <span className="mono">/mezo/deployment.json</span>
             {depError ? ', which could not be loaded.' : '.'}
           </p>
@@ -773,17 +898,19 @@ function Contracts({ dep, depError }: { dep: Deployment | null; depError: string
               )}
             </li>
           ))}
-          {dep?.owner && (
-            <li>
-              <div>
-                <h3>Policy owner</h3>
-                <p>Holds the Mezo trove the guard reads</p>
-              </div>
-              <ExtLink href={addressUrl(dep.owner)} className="mono mz-addr">
-                {dep.owner}
-              </ExtLink>
-            </li>
-          )}
+          {parties
+            .filter(([, , a]) => a)
+            .map(([name, role, a]) => (
+              <li key={name}>
+                <div>
+                  <h3>{name}</h3>
+                  <p>{role}</p>
+                </div>
+                <ExtLink href={addressUrl(a!)} className="mono mz-addr">
+                  {a}
+                </ExtLink>
+              </li>
+            ))}
           {dep?.policyCommitment && (
             <li>
               <div>
@@ -804,15 +931,17 @@ function Contracts({ dep, depError }: { dep: Deployment | null; depError: string
                   <div>
                     <h3>{t.label}</h3>
                     <p>
-                      {t.status === 'success'
-                        ? `Succeeded in block ${t.block?.toLocaleString('en-US')}`
-                        : t.status === 'reverted'
-                          ? `Reverted on-chain in block ${t.block?.toLocaleString('en-US')}`
-                          : t.status === 'pending'
-                            ? 'No receipt yet'
-                            : t.status === 'error'
-                              ? 'Receipt could not be read'
-                              : 'Reading receipt…'}
+                      <span className="mz-rx" data-status={t.status ?? 'loading'}>
+                        {t.status === 'success'
+                          ? `Succeeded in block ${t.block?.toLocaleString('en-US')}`
+                          : t.status === 'reverted'
+                            ? `Reverted on-chain in block ${t.block?.toLocaleString('en-US')}`
+                            : t.status === 'pending'
+                              ? 'No receipt yet'
+                              : t.status === 'error'
+                                ? 'Receipt not returned by the RPC (retried once)'
+                                : 'Reading receipt…'}
+                      </span>
                       {t.note ? ` · ${t.note}` : ''}
                     </p>
                   </div>
@@ -835,32 +964,14 @@ export function MezoLeash({ hasHero }: { hasHero: boolean }) {
   const depState = useDeployment();
   const dep = depState.status === 'ok' ? depState.dep : null;
   const depError = depState.status === 'error' ? depState.error : null;
-  const [latestBlock, setLatestBlock] = useState<number | null>(null);
-
-  // The feed follows the live panel's block; a cheap separate poll keeps the two components independent.
-  useEffect(() => {
-    if (!dep?.leashMUSD) return;
-    let live = true;
-    const tick = () =>
-      document.visibilityState === 'visible' &&
-      rpc<string>('eth_blockNumber', [])
-        .then((b) => live && setLatestBlock(Number(b)))
-        .catch(() => {});
-    tick();
-    const t = setInterval(tick, REFRESH_MS);
-    return () => {
-      live = false;
-      clearInterval(t);
-    };
-  }, [dep]);
-
+  const txs = useRecordedTxs(dep);
+  const receipts = React.useMemo(() => Object.fromEntries(txs.map((t) => [t.hash.toLowerCase(), t.status])) as Receipts, [txs]);
   return (
-    <>
+    <ReceiptsCtx.Provider value={receipts}>
       <Hero hasHero={hasHero} />
-      <LivePanel dep={dep} depError={depError} />
-      <PaymentsFeed dep={dep} latestBlock={latestBlock} />
+      <JobsBoard dep={dep} depError={depError} />
       <HowItWorks />
-      <Contracts dep={dep} depError={depError} />
-    </>
+      <Contracts dep={dep} depError={depError} txs={txs} />
+    </ReceiptsCtx.Provider>
   );
 }
