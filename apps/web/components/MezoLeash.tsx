@@ -303,7 +303,7 @@ type Receipts = Record<string, TxRecord['status']>;
 type TxRecord = { key: string; label: string; hash: string; note?: string; status?: 'success' | 'reverted' | 'pending' | 'error'; block?: number };
 
 function humanize(key: string) {
-  const s = key.replace(/[_-]+/g, ' ').replace(/([a-z0-9])([A-Z])/g, '$1 $2').trim();
+  const s = key.replace(/[_-]+/g, ' ').replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/([a-zA-Z])(\d)/g, '$1 $2').trim();
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
@@ -928,6 +928,49 @@ function HowItWorks() {
   );
 }
 
+function txSummary(txs: TxRecord[]) {
+  const n = (st: TxRecord['status']) => txs.filter((t) => t.status === st).length;
+  const ok = n('success');
+  const reverted = n('reverted');
+  const unread = n('pending') + n('error');
+  const reading = txs.length - ok - reverted - unread;
+  const head = `All ${txs.length} transaction${txs.length === 1 ? '' : 's'} on Mezo testnet`;
+  if (reading > 0) return `${head} · reading receipts…`;
+  if (ok === txs.length) return `${head} · all succeeded`;
+  return `${head} · ${ok} succeeded, ${reverted} reverted${unread ? `, ${unread} without a receipt` : ''}`;
+}
+
+function RecordedTxs({ txs }: { txs: TxRecord[] }) {
+  return (
+    <details className="mz-txs">
+      <summary>{txSummary(txs)}</summary>
+      <ul>
+        {txs.map((t) => (
+          <li key={t.key}>
+            <span className="mz-txs-label" title={t.note}>
+              {t.label}
+            </span>
+            <ExtLink href={txUrl(t.hash)} className="mono">
+              {short(t.hash, 8, 6)}
+            </ExtLink>
+            <span className="mz-rx" data-status={t.status ?? 'loading'}>
+              {t.status === 'success'
+                ? `status 1 · block ${t.block?.toLocaleString('en-US')}`
+                : t.status === 'reverted'
+                  ? `reverted · block ${t.block?.toLocaleString('en-US')}`
+                  : t.status === 'pending'
+                    ? 'no receipt yet'
+                    : t.status === 'error'
+                      ? 'receipt not returned (retried once)'
+                      : 'reading…'}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 function Contracts({ dep, depError, txs }: { dep: Deployment | null; depError: string | null; txs: TxRecord[] }) {
   const rows: Array<{ name: string; role: string; addr: string | null; nd?: string }> = [
     { name: 'LeashClawback', role: 'Job escrow in MUSD, MEZO bonds, clawbacks', addr: dep?.leashClawback ?? null },
@@ -998,37 +1041,7 @@ function Contracts({ dep, depError, txs }: { dep: Deployment | null; depError: s
           )}
         </ul>
 
-        {txs.length > 0 && (
-          <>
-            <h3 className="mz-h3">Recorded transactions</h3>
-            <ul className="mz-contracts">
-              {txs.map((t) => (
-                <li key={t.key}>
-                  <div>
-                    <h3>{t.label}</h3>
-                    <p>
-                      <span className="mz-rx" data-status={t.status ?? 'loading'}>
-                        {t.status === 'success'
-                          ? `Succeeded in block ${t.block?.toLocaleString('en-US')}`
-                          : t.status === 'reverted'
-                            ? `Reverted on-chain in block ${t.block?.toLocaleString('en-US')}`
-                            : t.status === 'pending'
-                              ? 'No receipt yet'
-                              : t.status === 'error'
-                                ? 'Receipt not returned by the RPC (retried once)'
-                                : 'Reading receipt…'}
-                      </span>
-                      {t.note ? ` · ${t.note}` : ''}
-                    </p>
-                  </div>
-                  <ExtLink href={txUrl(t.hash)} className="mono mz-addr">
-                    {t.hash}
-                  </ExtLink>
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
+        {txs.length > 0 && <RecordedTxs txs={txs} />}
       </div>
     </section>
   );
