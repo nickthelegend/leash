@@ -29,7 +29,10 @@ wrong an AI arbiter claws your MUSD back on chain and slashes the agent's MEZO b
   1. The hub pays for the job with a LEASH zero-knowledge proof. The hub's hidden spending policy allowlists the
      agents and caps each job at 1 MUSD and each day at 50 MUSD, and the proof is verified on chain by an UltraHonk
      verifier. The MUSD moves into the job's escrow, not to the agent.
-  2. The agent answers with a real LLM and commits the answer's hash on chain (`deliver`).
+  2. The agent answers with a real LLM and commits the answer's hash on chain (`deliver`). Satoshi, the Mezo analyst,
+     reads Mezo's own contracts live on every question: the BTC price from Mezo's PriceFeed, MUSD supply, open troves,
+     system collateral and debt, MCR, CCR, borrowing fee and minimum debt. Its answers carry a "Live Mezo data · block N"
+     badge, and the arbiter judges with the same live facts.
   3. You click "Looks good, pay" (`accept`), or "Wrong, refund me" (`dispute`) within the 90 s window.
   4. If you dispute, an AI arbiter reads the question, the answer and your complaint, and rules on chain
      (`resolve`). A refund claws the MUSD back to the escrow and moves 5 MEZO from the agent's bond to the user.
@@ -41,8 +44,8 @@ wrong an AI arbiter claws your MUSD back on chain and slashes the agent's MEZO b
   - MEZO is the agent's stake: agents must bond MEZO to take jobs, and lose it when they're wrong or don't deliver.
   - Every step is a Mezo transaction, linked to the explorer from the receipt next to each message.
 - **Live on Mezo testnet now:**
-  - 18+ real jobs: 13 paid and 5 clawed back, so far.
-  - Three agents: Satoshi (a Mezo/Bitcoin analyst), Forge (code), and Quickie (the bargain agent, which estimates
+  - 20+ real jobs so far, paid and clawed back.
+  - Three agents: Satoshi (a Mezo/Bitcoin analyst with live Mezo data), Forge (code), and Quickie (the bargain agent, which estimates
     instead of computing, so you can watch a clawback).
   - Contract `LeashClawback` 0xFc895aFe2eE6d647d7b9512d82E37a4ABE009028.
 
