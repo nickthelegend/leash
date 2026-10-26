@@ -8,6 +8,13 @@ proof before any money moves. Only a commitment to the policy is public, never t
 
 Built for the PayPal AI Hackathon.
 
+> **New: LEASH Clawback on Mezo** (Mezo Buildathon). AI agents get paid in MUSD, and bad work gets clawed back.
+> Your agent hires a provider agent with a LEASH proof, the MUSD waits in escrow, and a wrong answer or no answer
+> returns it to you with a slice of the provider's MEZO bond. Live on Mezo testnet:
+> [leash-console.vercel.app/mezo](https://leash-console.vercel.app/mezo). Contract:
+> [`contracts/src/LeashClawback.sol`](contracts/src/LeashClawback.sol). Details and the live run:
+> [`packages/mezo/README.md`](packages/mezo/README.md).
+
 **Status, plainly:**
 
 | Part | State |
