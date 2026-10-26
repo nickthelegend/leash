@@ -36,18 +36,25 @@ uint() { awk '{print $1}'; }
 log "owner $OWNER  BTC $(cast balance "$OWNER" --rpc-url "$R" --ether)"
 
 # 1. contracts
+# forge create checks for code right after the receipt; Mezo's RPC can lag, so a successful deploy is reported
+# as "contract was not deployed". create() sends the deploy, then waits for code at the expected address.
+create() { # create <out-var> <forge create args...>
+  local var=$1; shift
+  local nonce addr; nonce=$(cast nonce "$OWNER" --rpc-url "$R")
+  addr=$(cast compute-address "$OWNER" --nonce "$nonce" | awk '{print $NF}')
+  (cd contracts && forge create "$@" --rpc-url "$R" --private-key "$MEZO_DEPLOYER_KEY" --broadcast >/dev/null 2>&1) || true
+  for _ in $(seq 40); do [ "$(cast code "$addr" --rpc-url "$R")" != 0x ] && break; sleep 3; done
+  [ "$(cast code "$addr" --rpc-url "$R")" != 0x ] || { echo "deploy of $* failed (no code at $addr)" >&2; exit 1; }
+  printf -v "$var" '%s' "$addr"
+}
 if [ -z "$(get_dep .leashMUSD)" ]; then
-  cd contracts
-  LIB=$(forge create src/LeashVerifier.sol:ZKTranscriptLib --rpc-url "$R" --private-key "$MEZO_DEPLOYER_KEY" --broadcast --json | jq -er .deployedTo)
-  VERIFIER=$(forge create src/LeashVerifier.sol:HonkVerifier --libraries "src/LeashVerifier.sol:ZKTranscriptLib:$LIB" \
-    --rpc-url "$R" --private-key "$MEZO_DEPLOYER_KEY" --broadcast --json | jq -er .deployedTo)
-  OUT=$(forge create src/LeashMUSD.sol:LeashMUSD --rpc-url "$R" --private-key "$MEZO_DEPLOYER_KEY" --broadcast --json \
-    --constructor-args "$VERIFIER" "$MUSD" "$TROVE_MANAGER" "$PRICE_FEED")
-  LEASH=$(echo "$OUT" | jq -er .deployedTo)
-  BLOCK=$(cast receipt "$(echo "$OUT" | jq -er .transactionHash)" blockNumber --rpc-url "$R")
-  cd "$ROOT"
-  set_dep ".zkTranscriptLib=\"$LIB\" | .verifier=\"$VERIFIER\" | .leashMUSD=\"$LEASH\" | .deployBlock=$BLOCK | .txs.deployLeashMUSD=\"$(echo "$OUT" | jq -r .transactionHash)\""
-  log "deployed LeashMUSD $LEASH (verifier $VERIFIER) at block $BLOCK"
+  LIB=${MEZO_ZKLIB:-}; VERIFIER=${MEZO_VERIFIER:-}   # reuse a deployed verifier if given
+  [ -n "$LIB" ] || create LIB src/LeashVerifier.sol:ZKTranscriptLib
+  [ -n "$VERIFIER" ] || create VERIFIER src/LeashVerifier.sol:HonkVerifier --libraries "src/LeashVerifier.sol:ZKTranscriptLib:$LIB"
+  create LEASH src/LeashMUSD.sol:LeashMUSD --constructor-args "$VERIFIER" "$MUSD" "$TROVE_MANAGER" "$PRICE_FEED"
+  BLOCK=$(cast block-number --rpc-url "$R")
+  set_dep ".zkTranscriptLib=\"$LIB\" | .verifier=\"$VERIFIER\" | .leashMUSD=\"$LEASH\" | .deployBlock=$((BLOCK - 50))"
+  log "deployed LeashMUSD $LEASH (verifier $VERIFIER)"
 fi
 LEASH=$(get_dep .leashMUSD)
 
