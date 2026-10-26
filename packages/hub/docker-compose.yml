@@ -1,0 +1,27 @@
+# LEASH Hub API behind Coolify's Traefik on the VPS. Keys: ./hub.env (mode 600, not in git); state: ./data (uid 1000).
+services:
+  hub:
+    build:
+      context: .
+      dockerfile: packages/hub/Dockerfile
+    image: hk-leash-hub:latest
+    restart: unless-stopped
+    mem_limit: 512m
+    memswap_limit: 768m
+    cpus: 0.75
+    volumes:
+      - ./data:/data
+      - ./hub.env:/run/hub.env:ro
+    environment:
+      HUB_ALLOWED_ORIGINS: "*"
+    networks: [coolify]
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.hk-leash-hub.rule=Host(`hub-api.201-18-198-162.sslip.io`)
+      - traefik.http.routers.hk-leash-hub.entrypoints=https
+      - traefik.http.routers.hk-leash-hub.tls=true
+      - traefik.http.routers.hk-leash-hub.tls.certresolver=letsencrypt
+      - traefik.http.services.hk-leash-hub.loadbalancer.server.port=8787
+networks:
+  coolify:
+    external: true

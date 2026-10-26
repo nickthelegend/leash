@@ -40,3 +40,7 @@ e2e/.run-ultra/
 
 # Mezo live run: private policy salts and spend chain
 packages/mezo/.state/
+
+# LEASH Hub: private policy salts, spend chain, request log
+packages/hub/.state/
+packages/hub/data/

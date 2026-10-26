@@ -1,0 +1,16 @@
+{
+  "name": "@leash/hub",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "LEASH Hub API: chat with AI agents on Mezo; every message is a LEASH-proven MUSD job that bad answers claw back",
+  "scripts": {
+    "start": "node src/server.mjs",
+    "setup": "node scripts/setup.mjs"
+  },
+  "dependencies": {
+    "@leash/core": "workspace:*",
+    "viem": "2.21.54"
+  },
+  "license": "MIT"
+}
