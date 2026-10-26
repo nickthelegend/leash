@@ -1,0 +1,7 @@
+{
+  "epoch": 20752,
+  "payee": "0xA4221FB0351458f1ec05c9E96639AE80A45fbDD8",
+  "commitment": "0x00f6f5031f8e027f7492f8c0c64f7fc102db3e7572215f802c18188acbe91b20",
+  "maxPerTxCents": 500,
+  "dailyCapCents": 1500
+}
