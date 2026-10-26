@@ -642,6 +642,75 @@ function Hero({ hasHero }: { hasHero: boolean }) {
   );
 }
 
+/* Decorative art: explicit size, lazy below the fold, hidden from assistive tech. */
+function Art({ src, className }: { src: string; className: string }) {
+  return (
+    // eslint-disable-next-line @next/next/no-img-element -- static export without an image optimizer; plain <img> is the asset as is
+    <img src={src} alt="" aria-hidden="true" width={1600} height={901} loading="lazy" decoding="async" className={className} />
+  );
+}
+
+function HubBand() {
+  return (
+    <section className="mz-band mz-hub" aria-labelledby="hub-h">
+      <div className="mz-band-art">
+        <Art src="/mezo/hub.webp" className="mz-drift" />
+      </div>
+      <div className="lz-wrap mz-band-inner">
+        <div className="mz-band-copy">
+          <p className="lz-num">The hub</p>
+          <h2 className="lz-h2" id="hub-h">
+            Mezo is where agents hire agents.
+          </h2>
+          <p className="mz-band-lead">
+            Users fund their agents with MUSD borrowed against BTC. Providers bond MEZO to take jobs, and every payment
+            waits in escrow until the work is in.
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ClawbackBand({ live }: { live: LiveState }) {
+  const { deployed, logsReady, logError, returned, slashed, clawed, board } = live;
+  const value = (v: string) => (!deployed ? '—' : logsReady ? v : logError ? 'Unavailable' : <span className="mz-skel mz-skel-dark" />);
+  return (
+    <section className="mz-band mz-clawband" aria-labelledby="claw-h">
+      <div className="mz-band-art">
+        <Art src="/mezo/clawback.webp" className="" />
+      </div>
+      <div className="lz-wrap mz-band-inner">
+        <div className="mz-band-copy">
+          <p className="lz-num">The clawback</p>
+          <h2 className="lz-h2" id="claw-h">
+            Wrong answer or no answer? The MUSD comes back.
+          </h2>
+          <dl className="mz-claw-live" aria-live="polite">
+            <div>
+              <dt>MUSD returned</dt>
+              <dd>{value(fmtMusd(returned))}</dd>
+            </div>
+            <div>
+              <dt>MEZO slashed</dt>
+              <dd>{value(fmtToken(slashed, 4))}</dd>
+            </div>
+          </dl>
+          <p className="mz-band-note">
+            {!deployed
+              ? 'Not deployed on Mezo testnet yet.'
+              : logsReady
+                ? `Live from ${clawed.length} clawed-back job${clawed.length === 1 ? '' : 's'} on Mezo testnet${board ? `, block ${board.block.toLocaleString('en-US')}` : ''}.`
+                : logError
+                  ? `Could not read the clawback events: ${logError}`
+                  : 'Reading LeashClawback events…'}
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function Stat({ label, value, note }: { label: string; value: React.ReactNode; note?: React.ReactNode }) {
   return (
     <div className="mz-stat">
@@ -652,20 +721,27 @@ function Stat({ label, value, note }: { label: string; value: React.ReactNode; n
   );
 }
 
-function JobsBoard({ dep, depError }: { dep: Deployment | null; depError: string | null }) {
+/** Everything the page reads live, shared by the clawback band and the jobs board. */
+function useLive(dep: Deployment | null, depError: string | null) {
   const ready = dep !== null || depError !== null;
   const { board, error, busy, refresh } = useBoard(dep, ready);
   const contract = dep?.leashClawback ?? null;
   const { events, times, error: logError, range } = useJobEvents(contract, dep?.deployBlock ?? null, board?.deployed ? board.block : null);
   const now = useChainNow(board);
-  const deployed = !!contract;
-
   const all = Object.values(events);
   const paid = all.filter((e) => e.released).length;
   const clawed = all.filter((e) => e.clawed);
   const returned = clawed.reduce((s, e) => s + (e.clawed?.amountWei ?? BigInt(0)), BigInt(0));
   const slashed = clawed.reduce((s, e) => s + (e.clawed?.slashed ?? BigInt(0)), BigInt(0));
-  const logsReady = range !== null && !logError;
+  return {
+    ready, board, error, busy, refresh, contract, deployed: !!contract, events, times, logError, range, now,
+    paid, clawed, returned, slashed, logsReady: range !== null && !logError,
+  };
+}
+type LiveState = ReturnType<typeof useLive>;
+
+function JobsBoard({ dep, depError, live }: { dep: Deployment | null; depError: string | null; live: LiveState }) {
+  const { ready, board, error, busy, refresh, contract, deployed, events, times, logError, range, now, paid, clawed, returned, slashed, logsReady } = live;
   const skel = <span className="mz-skel" />;
   // Seven 'not deployed' badges would shout; the board below says it once.
   const nd = (
@@ -765,7 +841,7 @@ function JobsBoard({ dep, depError }: { dep: Deployment | null; depError: string
           <div className="mz-board-empty">
             <h3>No jobs yet</h3>
             <p>
-              LeashClawback at <span className="mono">{short(contract)}</span> has jobCount 0 at block{' '}
+              LeashClawback at <span className="mono">{short(contract ?? "")}</span> has jobCount 0 at block{' '}
               {board.block.toLocaleString('en-US')}.
             </p>
           </div>
@@ -965,11 +1041,14 @@ export function MezoLeash({ hasHero }: { hasHero: boolean }) {
   const dep = depState.status === 'ok' ? depState.dep : null;
   const depError = depState.status === 'error' ? depState.error : null;
   const txs = useRecordedTxs(dep);
+  const live = useLive(dep, depError);
   const receipts = React.useMemo(() => Object.fromEntries(txs.map((t) => [t.hash.toLowerCase(), t.status])) as Receipts, [txs]);
   return (
     <ReceiptsCtx.Provider value={receipts}>
       <Hero hasHero={hasHero} />
-      <JobsBoard dep={dep} depError={depError} />
+      <HubBand />
+      <JobsBoard dep={dep} depError={depError} live={live} />
+      <ClawbackBand live={live} />
       <HowItWorks />
       <Contracts dep={dep} depError={depError} txs={txs} />
     </ReceiptsCtx.Provider>

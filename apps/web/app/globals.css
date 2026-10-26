@@ -2095,6 +2095,110 @@ body {
   text-underline-offset: 3px;
 }
 
+/* ---- art bands: the hub, the clawback (yellow, art on the right, copy on the art's empty left) ---- */
+.mz-band {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: clamp(440px, 36vw, 620px);
+  overflow: hidden;
+  background: #fdd104;
+  color: var(--ink);
+}
+.mz-hub {
+  border-top: 1.5px dashed rgba(10, 26, 74, 0.28);
+}
+.mz-clawband {
+  background: #fdd202;
+}
+.mz-band-art {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 62%;
+  overflow: hidden;
+  /* the art's backdrop drifts a shade from the band's: fade its left edge in */
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 22%);
+  mask-image: linear-gradient(90deg, transparent 0, #000 22%);
+}
+.mz-band-art img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: right center;
+}
+.mz-drift {
+  transform-origin: 80% 60%;
+  animation: mz-drift 26s ease-in-out infinite alternate;
+}
+@keyframes mz-drift {
+  from {
+    transform: scale(1);
+  }
+  to {
+    transform: scale(1.04) translateX(-0.8%);
+  }
+}
+.mz-band-inner {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+}
+.mz-band-copy {
+  max-width: min(520px, 40%);
+  padding: 88px 0;
+}
+.mz-band .lz-num {
+  color: var(--deep);
+  opacity: 0.75;
+}
+.mz-band .lz-h2 {
+  max-width: 16ch;
+}
+.mz-band-lead {
+  margin: 20px 0 0;
+  max-width: 44ch;
+  font-size: 17px;
+  line-height: 1.55;
+  color: #1e2b57;
+}
+.mz-claw-live {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 40px;
+  margin: 30px 0 0;
+  padding-top: 18px;
+  border-top: 2px solid var(--deep);
+}
+.mz-claw-live dt {
+  font: 500 12px/1.2 var(--mono-font);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #3a4470;
+}
+.mz-claw-live dd {
+  margin: 8px 0 0;
+  font-weight: 600;
+  font-size: clamp(44px, 4.6vw, 68px);
+  line-height: 0.95;
+  letter-spacing: -0.055em;
+  color: var(--mz-cobalt);
+  font-variant-numeric: tabular-nums;
+}
+.mz-band-note {
+  margin: 16px 0 0;
+  font-size: 14px;
+  color: #3a4470;
+  overflow-wrap: anywhere;
+}
+.mz-skel-dark {
+  width: 3ch;
+  background: linear-gradient(90deg, rgba(10, 26, 74, 0.08), rgba(10, 26, 74, 0.2), rgba(10, 26, 74, 0.08));
+  background-size: 200% 100%;
+}
+
 /* how it works, four steps */
 .mz-steps-4 {
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2220,6 +2324,30 @@ body {
   .mz-jobs {
     grid-template-columns: 1fr;
   }
+  .mz-band {
+    flex-direction: column;
+    align-items: stretch;
+    min-height: 0;
+  }
+  .mz-band-inner {
+    order: 1;
+  }
+  .mz-band-copy {
+    max-width: 640px;
+    padding: 64px 0 28px;
+  }
+  .mz-band-art {
+    position: relative;
+    order: 2;
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    max-height: 520px;
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+  .mz-band-art img {
+    object-position: 85% center;
+  }
   .mz-steps-4 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -2231,6 +2359,9 @@ body {
   }
   .mz-live {
     padding: 72px 0;
+  }
+  .mz-band-copy {
+    padding: 52px 0 24px;
   }
   .mz-refresh {
     width: 42px;
@@ -2322,6 +2453,10 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .mz-drift {
+    animation: none;
+    transform: none;
+  }
   .mz-pill[data-state='live'] i,
   .mz-spin,
   .mz-skel {
