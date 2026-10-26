@@ -530,9 +530,17 @@ export function EvidenceSections() {
   );
 }
 
-export function SiteFooter({ page = 'landing' }: { page?: 'landing' | 'evidence' }) {
+export function SiteFooter({ page = 'landing' }: { page?: 'landing' | 'evidence' | 'mezo' }) {
   const links: Array<[string, string]> =
-    page === 'evidence'
+    page === 'mezo'
+      ? [
+          ['Live leash', '#live'],
+          ['Payments', '#payments'],
+          ['How it works', '#how'],
+          ['Contracts', '#contracts'],
+          ['Console', '/#console'],
+        ]
+      : page === 'evidence'
       ? [
           ['Tag', '#tag'],
           ['Lead', '#lead'],

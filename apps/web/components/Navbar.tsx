@@ -3,9 +3,9 @@ import { LeashLogo } from './Logo';
 
 const REPO_URL = 'https://github.com/nickthelegend/leash';
 
-/** Landing nav on the yellow hero: logo left, sections and the console on the right. The evidence page
- *  lists its own sections and links back to the console on the landing. */
-export function Navbar({ page = 'landing' }: { page?: 'landing' | 'evidence' }) {
+/** Landing nav on the yellow hero: logo left, sections and the console on the right. The evidence and
+ *  Mezo pages list their own sections and link back to the console on the landing. */
+export function Navbar({ page = 'landing' }: { page?: 'landing' | 'evidence' | 'mezo' }) {
   const links: Array<[string, string]> =
     page === 'evidence'
       ? [
@@ -13,16 +13,26 @@ export function Navbar({ page = 'landing' }: { page?: 'landing' | 'evidence' }) 
           ['Lead', '#lead'],
           ['Snaps', '#snaps'],
           ['Walk log', '#walk'],
+          ['Mezo', '/mezo'],
         ]
-      : [
-          ['How it works', '#how'],
-          ['Proof', '#proof'],
-          ['Evidence', '/evidence'],
-        ];
+      : page === 'mezo'
+        ? [
+            ['Live leash', '#live'],
+            ['Payments', '#payments'],
+            ['How it works', '#how'],
+            ['Contracts', '#contracts'],
+          ]
+        : [
+            ['How it works', '#how'],
+            ['Proof', '#proof'],
+            ['Evidence', '/evidence'],
+            ['Mezo', '/mezo'],
+          ];
+  const sub = page !== 'landing';
   return (
     <nav className="lz-nav" aria-label="Main">
       <div className="lz-wrap lz-nav-row">
-        <LeashLogo tone="deep" href={page === 'evidence' ? '/' : undefined} />
+        <LeashLogo tone="deep" href={sub ? '/' : undefined} />
         <div className="lz-nav-right">
           <ul>
             {links.map(([label, href]) => (
@@ -36,7 +46,7 @@ export function Navbar({ page = 'landing' }: { page?: 'landing' | 'evidence' }) 
               </a>
             </li>
           </ul>
-          <a className="btn btn-dark btn-sm" href={page === 'evidence' ? '/#console' : '#console'}>
+          <a className="btn btn-dark btn-sm" href={sub ? '/#console' : '#console'}>
             Console
           </a>
         </div>
