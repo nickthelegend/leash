@@ -1,11 +1,15 @@
 import { useEffect, useState } from "react";
-import { API_BASE, api, errorText, type HubInfo } from "./api";
-import { addrUrl, formatWei, shortHex } from "./format";
-import { CoinGlyph, Logo } from "./components/Art";
+import { API_BASE, api, errorText, type Agent, type HubInfo } from "./api";
+import { centsToMusd, formatWei, shortHex } from "./format";
+import { AgentAvatar, CoinGlyph, Logo } from "./components/Art";
+
+const CLAWBACK = "0xFc895aFe2eE6d647d7b9512d82E37a4ABE009028";
+const EXPLORER = "https://explorer.test.mezo.org";
 
 export function Landing({ focusHow }: { focusHow: boolean }) {
   const [hub, setHub] = useState<HubInfo | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [agents, setAgents] = useState<Agent[] | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -13,6 +17,10 @@ export function Landing({ focusHow }: { focusHow: boolean }) {
       .hub()
       .then((h) => alive && setHub(h))
       .catch((e) => alive && setErr(errorText(e)));
+    api
+      .agents()
+      .then((a) => alive && setAgents(a))
+      .catch(() => undefined);
     return () => {
       alive = false;
     };
@@ -128,6 +136,39 @@ export function Landing({ focusHow }: { focusHow: boolean }) {
         </div>
       </section>
 
+      <section className="meet" aria-labelledby="meet-title">
+        <div className="how-inner">
+          <p className="eyebrow eyebrow-yellow">Meet the agents</p>
+          <h2 id="meet-title">Three bonded agents. Pick one, pay per message.</h2>
+          {agents && agents.length > 0 ? (
+            <ul className="meet-row">
+              {agents.map((a) => (
+                <li key={a.id}>
+                  <a className="meet-card" href="#/hub" onClick={() => {
+                    try {
+                      localStorage.setItem("leash-hub-agent", a.id);
+                    } catch {
+                      /* ignore */
+                    }
+                  }}>
+                    <span className="meet-portrait">
+                      <AgentAvatar id={a.id} style={a.style} size={220} label={`${a.name} portrait`} />
+                    </span>
+                    <span className="meet-name">{a.name}</span>
+                    <span className="meet-tag">{a.tagline}</span>
+                    <span className="meet-nums mono">
+                      <b>{centsToMusd(a.priceCents)} MUSD</b> / message · {formatWei(a.bondWei, 0)} MEZO bond
+                    </span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="muted">{err ? `Hub API unreachable at ${API_BASE}; the roster appears once it answers.` : "Loading the agent roster…"}</p>
+          )}
+        </div>
+      </section>
+
       <section className="why" aria-labelledby="why-title">
         <h2 id="why-title" className="sr-only">
           Why LEASH Hub
@@ -149,27 +190,29 @@ export function Landing({ focusHow }: { focusHow: boolean }) {
             <p>A ZK spending policy caps what can leave, Mezo escrow holds it, and a bonded agent loses MEZO when it's wrong.</p>
           </div>
         </div>
-        <div className="why-cta">
-          <a href="#/hub" className="btn btn-yellow btn-lg">
-            <CoinGlyph size={18} /> Start chatting
-          </a>
-        </div>
+      </section>
+
+      <section className="cta-band" aria-labelledby="cta-title">
+        <h2 id="cta-title">Try it now: chat, judge, claw it back.</h2>
+        <a href="#/hub" className="btn btn-navy btn-lg">
+          <CoinGlyph size={18} /> Start chatting
+        </a>
       </section>
 
       <footer className="l-foot">
         <Logo />
-        <p className="mono">
-          Mezo testnet · chain 31611
-          {hub && (
-            <>
-              {" · escrow "}
-              <a href={addrUrl(hub.explorer, hub.contract)} target="_blank" rel="noopener noreferrer">
-                {shortHex(hub.contract)}
-              </a>
-            </>
-          )}
-        </p>
-        <p className="muted">MIT · © 2026 Nivesh Gajengi · Testnet only, no real funds.</p>
+        <nav className="foot-links" aria-label="Project links">
+          <a href="https://github.com/nickthelegend/leash" target="_blank" rel="noopener noreferrer">
+            GitHub
+          </a>
+          <a href={`${EXPLORER}/address/${CLAWBACK}`} target="_blank" rel="noopener noreferrer">
+            LeashClawback <span className="mono">{shortHex(CLAWBACK)}</span>
+          </a>
+          <a href="https://leash-console.vercel.app/mezo" target="_blank" rel="noopener noreferrer">
+            Jobs board
+          </a>
+        </nav>
+        <p className="muted">Mezo testnet · chain 31611 · MIT · © 2026 Nivesh Gajengi · testnet only, no real funds.</p>
       </footer>
     </div>
   );

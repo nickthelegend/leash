@@ -225,6 +225,16 @@ function Turn({
   }, [disputing]);
 
   const pending = r.status in PENDING_LABEL;
+  // Reveal an answer once: messages restored with their answer already present skip it.
+  const revealed = useRef(!!r.answer);
+  useEffect(() => {
+    if (r.answer && !revealed.current) {
+      const t = window.setTimeout(() => {
+        revealed.current = true;
+      }, 700);
+      return () => window.clearTimeout(t);
+    }
+  }, [r.answer]);
   const left = r.disputeUntil ? r.disputeUntil - now : null;
   const windowOpen = r.status === "delivered" && (left === null || left > 0);
   const total = hub?.disputeWindowSec || 0;
@@ -245,16 +255,7 @@ function Turn({
             {selected ? "Showing receipt" : "View receipt"}
             {r.jobId !== null && r.jobId !== undefined && <span className="mono"> · job #{r.jobId}</span>}
           </button>
-          {pending && (
-            <div className="thinking" role="status">
-              <span className="dots" aria-hidden="true">
-                <i />
-                <i />
-                <i />
-              </span>
-              {PENDING_LABEL[r.status]}…
-            </div>
-          )}
+          {pending && <PendingRail status={r.status} />}
           {r.status === "failed" && (
             <div className="bubble-error" role="alert">
               <strong>This job failed.</strong> {r.error || "The hub reported a failure without details."}
@@ -267,7 +268,11 @@ function Turn({
               {r.deadline ? (r.deadline - now > 0 ? <> in <span className="mono">{clock(r.deadline - now)}</span>, at the deadline.</> : <>: the deadline passed, clawback is on its way.</>) : <> after the deadline.</>}
             </div>
           )}
-          {r.answer && <Markdown text={r.answer} />}
+          {r.answer && (
+            <div className={revealed.current ? undefined : "answer-reveal"}>
+              <Markdown text={r.answer} />
+            </div>
+          )}
           {r.answer && r.mezoBlock ? (
             <p className="live-mezo">
               <span className="live-dot" aria-hidden="true" /> Live Mezo data · read from Mezo&rsquo;s contracts at block {r.mezoBlock.toLocaleString("en-US")}
@@ -277,6 +282,11 @@ function Turn({
           {r.status === "clawed_back" && (
             <div className="stamp-wrap">
               <div className="stamp" role="status">
+                <span className="stamp-burst" aria-hidden="true">
+                  {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
+                    <i key={i} style={{ ["--a" as string]: `${i * 45 + 10}deg` }} />
+                  ))}
+                </span>
                 <span className="stamp-top">Clawed back</span>
                 <span className="stamp-main">
                   {centsToMusd(r.priceCents)} MUSD returned{slashLabel ? ` · ${slashLabel} MEZO slashed` : " · bond slashed"}
@@ -403,5 +413,32 @@ function Turn({
         </div>
       </div>
     </li>
+  );
+}
+
+const RAIL = ["ZK proof", "MUSD in escrow", "Agent thinking", "Delivered on chain"];
+const RAIL_INDEX: Record<string, number> = { queued: 0, proving: 0, opening: 1, thinking: 2, delivering: 3 };
+
+function PendingRail({ status }: { status: string }) {
+  const at = RAIL_INDEX[status] ?? 0;
+  return (
+    <div className="rail" role="status">
+      <ol className="rail-steps">
+        {RAIL.map((label, i) => (
+          <li key={label} className={i < at ? "rail-done" : i === at ? "rail-on" : undefined}>
+            <span className="rail-dot" aria-hidden="true" />
+            <span className="rail-label">{label}</span>
+          </li>
+        ))}
+      </ol>
+      <p className="rail-now">
+        <span className="dots" aria-hidden="true">
+          <i />
+          <i />
+          <i />
+        </span>
+        {PENDING_LABEL[status] ?? status}…
+      </p>
+    </div>
   );
 }
