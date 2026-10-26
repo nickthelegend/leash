@@ -37,3 +37,6 @@ packages/core/policy_circuit/Prover_*.toml
 
 # local e2e run scratch (anvil state)
 e2e/.run-ultra/
+
+# Mezo live run: private policy salts and spend chain
+packages/mezo/.state/
