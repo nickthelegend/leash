@@ -59,6 +59,11 @@
   #s5 .outcome { position: relative; }
   .art.claw { background-image: url(clawback.webp); background-position: 55% 50%; }
   .y h2 { position: relative; max-width: 900px; } .y .sub { position: relative; }
+.shot { margin-top: 44px; border-radius: 18px; overflow: hidden; box-shadow: 0 50px 120px -50px rgba(0,0,0,.7), 0 0 0 1px rgba(255,255,255,.08); background: #0b1530; }
+  .shot .bar { height: 38px; background: #1a2340; display: flex; align-items: center; gap: 9px; padding: 0 16px; font: 500 18px 'Source Code Pro', monospace; color: rgba(255,255,255,.55); }
+  .shot .bar i { width: 12px; height: 12px; border-radius: 50%; background: #3a4466; display: inline-block; }
+  .shot img { display: block; width: 100%; }
+  .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 34px; }
 </style>
 </head>
 <body>
@@ -113,12 +118,22 @@
   <div class="foot"><span>LEASH Clawback on Mezo</span><span>05</span></div>
 </section>
 
+<section class="slide n" id="s4c" style="padding-top:80px;padding-bottom:90px">
+  <p class="kicker">Live · leash-hub.vercel.app</p>
+  <h2 style="font-size:70px">Chat, judge, <em>claw it back.</em></h2>
+  <div class="duo">
+    <div class="shot"><div class="bar"><i></i><i></i><i></i> Satoshi answered · you accepted · paid</div><img src="screen-paid.jpg" alt=""></div>
+    <div class="shot"><div class="bar"><i></i><i></i><i></i> Quickie estimated · disputed · clawed back</div><img src="screen-clawed.jpg" alt=""></div>
+  </div>
+  <div class="foot"><span>Real jobs on Mezo testnet, recorded from the live hub</span><span>06</span></div>
+</section>
+
 <section class="slide y" id="s4b">
   <div class="art claw"></div>
   <p class="kicker">The clawback</p>
   <h2>Wrong answer or no answer? <em>The MUSD comes back.</em></h2>
   <p class="sub" style="max-width:820px">And the provider's MEZO bond pays for the trouble.</p>
-  <div class="foot"><span>LEASH Clawback on Mezo</span><span>06</span></div>
+  <div class="foot"><span>LEASH Clawback on Mezo</span><span>07</span></div>
 </section>
 
 <section class="slide y" id="s5">
@@ -130,7 +145,7 @@
     <div class="outcome bad"><span class="tag">BAD ANSWER</span><span>The user disputes. The policy's arbiter checks the result and rules.</span><span class="res">MUSD back + MEZO slashed</span></div>
     <div class="outcome ghost"><span class="tag">NO ANSWER</span><span>The deadline passes with nothing delivered. Anyone can trigger the clawback.</span><span class="res">MUSD back + MEZO slashed</span></div>
   </div>
-  <div class="foot"><span>LEASH Clawback on Mezo</span><span>07</span></div>
+  <div class="foot"><span>LEASH Clawback on Mezo</span><span>08</span></div>
 </section>
 
 <section class="slide n" id="s6" style="padding-top:80px;padding-bottom:110px">
@@ -147,7 +162,7 @@
     <div><b>10</b><span>MEZO slashed to the user</span></div>
     <div><b>18</b><span>fork tests, real proofs</span></div>
   </div>
-  <div class="foot"><span>explorer.test.mezo.org · LeashClawback 0xFc895aFe…9028</span><span>08</span></div>
+  <div class="foot"><span>explorer.test.mezo.org · LeashClawback 0xFc895aFe…9028</span><span>09</span></div>
 </section>
 
 <section class="slide p" id="s7">
@@ -159,7 +174,7 @@
     <li>Policies are keyed by owner and commitment, so a front-runner gets only an empty copy. Providers can't unbond with open jobs.</li>
     <li>Tested on a fork of Mezo testnet with real MUSD and real proofs, then run live end to end.</li>
   </ul>
-  <div class="foot"><span>LEASH Clawback on Mezo</span><span>09</span></div>
+  <div class="foot"><span>LEASH Clawback on Mezo</span><span>10</span></div>
 </section>
 
 <section class="slide n" id="s8">
@@ -170,7 +185,7 @@
     <div class="card"><b>Real utility for MEZO</b><p>Providers must bond MEZO to earn, and lose it when they ghost or lie.</p></div>
     <div class="card"><b>Composable by design</b><p>Any agent framework can plug in: the job escrow is one contract, and the agent side is the LEASH TypeScript prover.</p></div>
   </div>
-  <div class="foot"><span>LEASH Clawback on Mezo</span><span>10</span></div>
+  <div class="foot"><span>LEASH Clawback on Mezo</span><span>11</span></div>
 </section>
 
 <section class="slide y" id="s9">
@@ -182,19 +197,20 @@
     <li><b>Provider reputation:</b> from bond history, so good providers need smaller bonds.</li>
     <li><b>Idle escrow earns:</b> MUSD waiting in jobs goes to the Stability Pool, then to Mezo mainnet.</li>
   </ul>
-  <div class="foot"><span>LEASH Clawback on Mezo</span><span>11</span></div>
+  <div class="foot"><span>LEASH Clawback on Mezo</span><span>12</span></div>
 </section>
 
 <section class="slide p" id="s10">
   <p class="kicker">Try it</p>
-  <h2>LEASH Clawback, <em>live on Mezo testnet.</em></h2>
+  <h2>LEASH Hub, <em>live on Mezo testnet.</em></h2>
   <div class="links">
-    <div><span>App</span>leash-console.vercel.app/mezo</div>
+    <div><span>Hub</span>leash-hub.vercel.app</div>
+    <div><span>Jobs board</span>leash-console.vercel.app/mezo</div>
     <div><span>Code</span>github.com/nickthelegend/leash</div>
     <div><span>Contract</span>0xFc895aFe2eE6d647d7b9512d82E37a4ABE009028</div>
     <div><span>Chain</span>Mezo testnet · 31611</div>
   </div>
-  <div class="foot"><span>Built by Nivesh Gajengi (nickthelegend) · MIT</span><span>12</span></div>
+  <div class="foot"><span>Built by Nivesh Gajengi (nickthelegend) · MIT</span><span>13</span></div>
 </section>
 
 </body>
