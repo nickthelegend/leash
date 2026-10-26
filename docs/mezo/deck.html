@@ -55,7 +55,9 @@
   .links { margin-top: 60px; display: grid; gap: 22px; font: 500 34px 'Source Code Pro', monospace; }
   .links span { color: var(--muted); display: inline-block; width: 260px; font-family: 'Sora', sans-serif; }
 .art { position: absolute; right: -40px; top: 0; height: 100%; width: 1080px; background-position: 70% 50%; background-size: cover; background-repeat: no-repeat; -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 28%); mask-image: linear-gradient(90deg, transparent 0, #000 28%); }
-  .art.hub { background-image: url(hub.webp); width: 960px; right: -120px; background-position: 80% 60%; -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 22%); mask-image: linear-gradient(90deg, transparent 0, #000 22%); } .art.claw { background-image: url(clawback.webp); background-position: 55% 50%; }
+  .art.hub { background-image: url(hub.webp); width: 960px; right: -120px; background-position: 80% 60%; -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 22%); mask-image: linear-gradient(90deg, transparent 0, #000 22%); } .art.arb { background-image: url(arbiter.webp); width: 860px; height: 520px; top: 0; right: 0; background-position: 75% 40%; -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 30%), linear-gradient(0deg, transparent 0, #000 30%); -webkit-mask-composite: source-in; mask-image: linear-gradient(90deg, transparent 0, #000 30%), linear-gradient(0deg, transparent 0, #000 30%); mask-composite: intersect; }
+  #s5 .outcome { position: relative; }
+  .art.claw { background-image: url(clawback.webp); background-position: 55% 50%; }
   .y h2 { position: relative; max-width: 900px; } .y .sub { position: relative; }
 </style>
 </head>
@@ -119,7 +121,8 @@
   <div class="foot"><span>LEASH Clawback on Mezo</span><span>06</span></div>
 </section>
 
-<section class="slide p" id="s5">
+<section class="slide y" id="s5">
+  <div class="art arb"></div>
   <p class="kicker">The clawback rules</p>
   <h2>Three outcomes. <em>One of them pays.</em></h2>
   <div style="margin-top:56px">
