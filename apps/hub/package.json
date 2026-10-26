@@ -1,0 +1,22 @@
+{
+  "name": "hub",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "LEASH Hub: chat with AI agents on Mezo testnet; every message is a paid MUSD job in escrow, bad answers get clawed back.",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5180",
+    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 5181"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.8",
+    "@types/react-dom": "^19.0.3",
+    "typescript": "^5.7.3",
+    "vite": "^7.3.0"
+  }
+}
