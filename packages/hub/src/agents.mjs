@@ -6,9 +6,10 @@ export const AGENTS = [
     id: 'satoshi',
     name: 'Satoshi',
     tagline: 'Bitcoin, Mezo and MUSD analyst',
-    description: 'Careful answers about Bitcoin, Mezo, MUSD, DeFi and markets. Says so when unsure.',
+    description: 'Careful answers about Bitcoin, Mezo, MUSD and DeFi, with live numbers read from Mezo\'s own contracts on every question.',
     priceCents: 10,
     style: 'accurate',
+    liveMezo: true, // reads Mezo's contracts live on every question
     keyEnv: 'MEZO_SATOSHI_KEY',
     addressEnv: 'MEZO_SATOSHI_ADDRESS',
     system:

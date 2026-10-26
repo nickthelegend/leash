@@ -15,6 +15,7 @@ for (const f of [process.env.HUB_ENV].filter(Boolean)) {
 const { MEZO, pub, signer, clawbackAbi, erc20Abi, jobIdFromReceipt } = await import('./chain.mjs');
 const { AGENTS, ARBITER_SYSTEM } = await import('./agents.mjs');
 const { loadPolicy, prove, spentToday, POLICY_SHAPE, STATE } = await import('./policy.mjs');
+const { mezoFacts } = await import('./mezoLive.mjs');
 
 const PORT = Number(process.env.PORT ?? 8787);
 const LLM_URL = process.env.HUB_LLM_URL ?? 'https://text.pollinations.ai/openai';
@@ -89,7 +90,12 @@ async function runJob(r) {
       set(r, { jobId: jobIdFromReceipt(receipt), txs: { ...r.txs, open: hash }, deadline: now() + Number(DELIVERY_WINDOW) });
     });
     set(r, { status: 'thinking' });
-    const answer = await llm(agent.system, r.message);
+    let system = agent.system;
+    if (agent.liveMezo) {
+      try { const f = await mezoFacts(); system += `\n\n${f.text} Use these exact live numbers when the question touches them, and say they are live from Mezo testnet at that block.`; set(r, { mezoBlock: f.block }); }
+      catch (e) { system += '\n\n(Live Mezo data is unavailable right now; say so if the question needs it.)'; }
+    }
+    const answer = await llm(system, r.message);
     const resultHash = keccak256(stringToHex(answer));
     set(r, { status: 'delivering', answer, resultHash });
     const { hash } = await providers[agent.id].write({ address: MEZO.leashClawback, abi: clawbackAbi, functionName: 'deliver',
@@ -123,7 +129,9 @@ async function dispute(r, reason) {
 
 async function judge(r) {
   try {
-    const raw = await llm(ARBITER_SYSTEM, `Request: ${r.message}\n\nAgent's answer: ${r.answer}\n\nUser's complaint: ${r.complaint || 'The answer is wrong.'}`, { json: true });
+    let facts = '';
+    try { facts = `\n\n${(await mezoFacts()).text}`; } catch { /* the arbiter still rules on the text */ }
+    const raw = await llm(ARBITER_SYSTEM + facts, `Request: ${r.message}\n\nAgent's answer: ${r.answer}\n\nUser's complaint: ${r.complaint || 'The answer is wrong.'}`, { json: true });
     const m = raw.match(/\{[\s\S]*\}/);
     const v = JSON.parse(m ? m[0] : raw);
     const verdict = { refund: v.refund === true, reason: String(v.reason ?? '').slice(0, 300) };
@@ -173,6 +181,7 @@ async function stats() {
 
 const routes = {
   'GET /api/health': async () => ({ ok: true }),
+  'GET /api/mezo': async () => { const { text, ...f } = await mezoFacts(); return f; },
   'GET /api/hub': async () => ({ chainId: MEZO.chainId, contract: MEZO.leashClawback, verifier: MEZO.verifier, owner: owner.address, relayer: relayer.address,
     arbiter: arbiter.address, policyCommitment: commitment, policyId, disputeWindowSec: DISPUTE_WINDOW, deliveryWindowSec: Number(DELIVERY_WINDOW),
     explorer: MEZO.explorer, musd: MEZO.musd, mezo: MEZO.mezo, policy: { maxPerJobCents: POLICY_SHAPE.maxPerTxCents, dailyCapCents: POLICY_SHAPE.dailyCapCents, spentTodayCents: spentToday() },
