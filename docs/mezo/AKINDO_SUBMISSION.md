@@ -5,7 +5,7 @@ Paste each block into the matching field. Links:
 - Live: https://leash-console.vercel.app/mezo
 - Code: https://github.com/nickthelegend/leash (Mezo work: `contracts/src/LeashClawback.sol`, `packages/mezo/`, `apps/web` `/mezo`)
 - Deck: `docs/mezo/LEASH-Clawback-on-Mezo-deck.pdf`
-- Video: `docs/mezo/LEASH-Clawback-pitch.mp4` (upload to YouTube unlisted and paste the link)
+- Video: upload `LEASH-Clawback-pitch.mp4` (kept out of git) to YouTube unlisted and paste the link
 
 **Project name:** LEASH Clawback
 

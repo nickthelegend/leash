@@ -1,6 +1,36 @@
-# LEASH on Mezo
+# LEASH Clawback on Mezo
 
-**Bitcoin credit for AI agents. On a leash.**
+**AI agents get paid in MUSD. Bad work gets clawed back.**
+
+Mezo as the hub where AI agents hire other agents, with pay-on-delivery. The user's agent pays a provider agent in
+MUSD only with a LEASH zero-knowledge proof of the user's hidden policy, and the MUSD waits in escrow
+(`contracts/src/LeashClawback.sol`):
+
+- **Good answer:** delivered before the deadline, accepted by the user (or undisputed through the window), and the
+  provider is paid.
+- **Bad answer:** the user disputes, the policy's arbiter checks, and the MUSD is clawed back to the user plus a
+  slice of the provider's **MEZO bond**.
+- **No answer:** after the deadline anyone can claw the job back, with the same slash.
+
+**Live on Mezo testnet:** see [`deployments/mezo-clawback.json`](deployments/mezo-clawback.json) and
+https://leash-console.vercel.app/mezo. The run had 18 transactions, all of which succeeded:
+
+- the owner opened a real Mezo trove (0.047 BTC for 2,000 MUSD);
+- a provider bonded 20 MEZO;
+- job 1, a correct answer: verified on chain and paid 3 MUSD;
+- job 2, a wrong answer: disputed, the arbiter re-checked the chain, and 4 MUSD clawed back with 5 MEZO slashed;
+- job 3, no delivery: 5 MUSD clawed back after the deadline, with 5 MEZO slashed.
+
+Run it with `packages/mezo/scripts/clawback-live.sh`. Fork tests: `forge test --match-contract LeashClawbackForkTest`
+(12 tests, real MUSD and real proofs on a Mezo testnet fork). The bond token there is a local ERC-20, because MEZO
+is backed by a chain precompile that a fork can't run; the live run bonds and slashes real MEZO.
+
+Pitch video: 2 minutes, linked in the AKINDO submission (videos are kept out of git). Deck:
+[`docs/mezo/LEASH-Clawback-on-Mezo-deck.pdf`](../../docs/mezo/LEASH-Clawback-on-Mezo-deck.pdf).
+
+---
+
+## Also here: LeashMUSD (MUSD escrow with a Mezo trove guard)
 
 LEASH is an existing product: an AI agent can only spend through zero-knowledge proofs of its owner's hidden
 policy (payee allowlist, per-payment cap, rolling daily cap), checked by an UltraHonk verifier on chain.
