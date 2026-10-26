@@ -1,0 +1,59 @@
+{
+  "chainId": 31611,
+  "txs": {
+    "gasAGENT": "0xcc49a188754f3940274901727f948fa13c34e62971c32e60e32b1e7c2a687184",
+    "gasPROVIDER": "0x83bb736e9c727dab8d9b1517cc2966be85991fe3bedde7b7170a9adcf195e664",
+    "gasARBITER": "0xe8078a7a47f43f6d371704b2bf5e9a0c4dfef17e3c104b7c5a1ef6ecbd7f8420",
+    "openTrove": "0xf6d8f542cbaea0a6bd94c5510080ea7c96a682a8ae1dde55d823bd0f9b151dac",
+    "approveMUSD": "0x13543d75b8edbd519007e516c2eac30a4fab959e550387539d86fb8cc6efe4e9",
+    "registerPolicy": "0x1ddd711d3efbcc88ec55db27e98f348c1d68d406fa4b9ada0d09fd408eeb5666",
+    "mezoToProvider": "0x0c9fcbd3f97f4595a84a9bb038e7e306c547f245de00e81998aab94cfc611541",
+    "approveMEZO": "0x9cefbab61af4982582ef9fc738524e8557ec4f6f6c553ce591878c542baa0e31",
+    "bond": "0x01403946da20226a0c81d0c3a10f2741ea174e0f5d37e1234c2587cf349c8548",
+    "job1Open": "0x20191e8ae1b4d5bf5e0ba399a49adaee23864ddb31bd9dc70798c722273e18da",
+    "job1Deliver": "0xe1854d5727efd7118a55ec60ddad432804b88452ee4d47e1e9542fa590a89161",
+    "job1Accept": "0xe8389137004624e1647a968604cd4391a015192d16a4d6df7b17b9ad2589f0eb",
+    "job2Open": "0xcda60caa9e47c101c52853dc1153dbbf115a9b7ff19927473d5114e78a9a3d58",
+    "job2Deliver": "0x0efb44b3ac93a17c894278a1432ecdea682cfa2340115a144e9657723d85fb14",
+    "job2Dispute": "0xcbd91be250591de089970cb9cd424a41946dd418fe08eea371d70ec2a9176b76",
+    "job2Resolve": "0x18e0a0a0a7e64e1ea00fa63d344dcc842c39c7db5a0f001938d25dd4e264e7e9",
+    "job3Open": "0x36c731153b41b19db306835be0560c6d8f3ff379766209bc3e23b0d82ea9e441",
+    "job3Clawback": "0xd9b44c8361eb3f30a338148ce821f9f8d30dbac26f66ed2fd6110b6828c53931"
+  },
+  "jobs": [
+    {
+      "jobId": 1,
+      "task": "Report MUSD totalSupply on Mezo testnet at block 16376811",
+      "answer": "523929457284611819634500427",
+      "verdict": "correct: verified on chain by the user's agent, accepted, provider paid"
+    },
+    {
+      "jobId": 2,
+      "task": "Report MUSD totalSupply on Mezo testnet at block 16376816",
+      "answer": "1047858914569223639269000854",
+      "correct": "523929457284611819634500427",
+      "verdict": "wrong: disputed, the arbiter re-checked the chain, clawed back to the user, provider bond slashed"
+    },
+    {
+      "jobId": 3,
+      "task": "Report MUSD totalSupply on Mezo testnet at block 16376823",
+      "answer": null,
+      "verdict": "no delivery before the deadline: clawed back to the user, provider bond slashed"
+    }
+  ],
+  "leashClawback": "0xFc895aFe2eE6d647d7b9512d82E37a4ABE009028",
+  "verifier": "0xc505B0E4d6b7B6E4162f5F82D7966FD73310e336",
+  "deployBlock": 16376754,
+  "owner": "0xafF11ED36517D7Eeb3DBE17b8c4c443d4279b019",
+  "agent": "0x6A114191d145A4F7180DE8F5C79ceD68649f4655",
+  "provider": "0xA4221FB0351458f1ec05c9E96639AE80A45fbDD8",
+  "arbiter": "0x02602C58D234582B1826f2e8075d70Cb18E4891d",
+  "disputeWindowSec": 90,
+  "policyCommitment": "0x16844f51db18eb5b6a8271894e41f8e96764f62a8e47ef74a2378acba63a4551",
+  "policyId": "0x08e4c472f12256fb91e0884031e52681a9dd56c531efba7f69a75abb6d2aa10b",
+  "job3Id": 3,
+  "job3Task": "Report MUSD totalSupply on Mezo testnet at block 16376823",
+  "escrowWei": "9000000000000000000",
+  "providerBondWei": "10000000000000000000",
+  "updatedAt": "2026-10-26T07:43:35Z"
+}

@@ -65,7 +65,7 @@ if [ "$(cast call "$TROVE_MANAGER" 'getTroveStatus(address)(uint8)' "$OWNER" --r
   TOTAL=$(python3 -c "print($DEBT + 200 * 10**18 + $FEE)")
   NICR=$(cast call "$HINTS" 'computeNominalCR(uint256,uint256)(uint256)' "$COLL_WEI" "$TOTAL" --rpc-url "$R" | uint)
   APPROX=$(cast call "$HINTS" 'getApproxHint(uint256,uint256,uint256)(address,uint256,uint256)' "$NICR" 30 42 --rpc-url "$R" | head -1)
-  read -r UP LOW < <(cast call "$SORTED" 'findInsertPosition(uint256,address,address)(address,address)' "$NICR" "$APPROX" "$APPROX" --rpc-url "$R" | tr '\n' ' ')
+  read -r UP LOW < <(cast call "$SORTED" 'findInsertPosition(uint256,address,address)(address,address)' "$NICR" "$APPROX" "$APPROX" --rpc-url "$R" | tr '\n' ' ') || true
   H=$(send --private-key "$MEZO_DEPLOYER_KEY" --value "$COLL_WEI" "$BORROWER_OPS" 'openTrove(uint256,address,address)' "$DEBT" "$UP" "$LOW" | tx)
   set_dep ".txs.openTrove=\"$H\""
   log "opened trove: ${COLL%ether} BTC for 2,000 MUSD  tx $H"
