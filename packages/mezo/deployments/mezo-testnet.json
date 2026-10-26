@@ -1,0 +1,8 @@
+{
+  "chainId": 31611,
+  "leashMUSD": "0x05525Eea73f5879a7Ae3EBa064a2224354AeAC5B",
+  "verifier": "0xc505B0E4d6b7B6E4162f5F82D7966FD73310e336",
+  "zkTranscriptLib": "0x1804b369Bf45c7B3f566EE3e89872b5F9700899D",
+  "note": "LeashMUSD (MUSD escrow with a Mezo trove guard) is deployed; its live payment run was superseded by LeashClawback (see mezo-clawback.json), which reuses this verifier",
+  "txs": {}
+}
