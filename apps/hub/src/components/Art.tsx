@@ -37,7 +37,24 @@ function hash(s: string): number {
 }
 
 /** A small robot head per agent: the style decides the face, the id nudges the details. */
+/** Generated 3D portraits for the hub's agents (public/agents/<id>.webp); other ids fall back to the SVG robot. */
+const PORTRAITS = new Set(["satoshi", "forge", "quickie"]);
+
 export function AgentAvatar({ id, style, size = 44, label }: { id: string; style: AgentStyle | string; size?: number; label?: string }) {
+  if (PORTRAITS.has(id)) {
+    return (
+      <img
+        src={`/agents/${id}.webp`}
+        width={size}
+        height={size}
+        alt={label ?? ""}
+        aria-hidden={label ? undefined : true}
+        className="avatar avatar-portrait"
+        style={{ borderRadius: Math.round(size * 0.29) }}
+        decoding="async"
+      />
+    );
+  }
   const st = (style in PALETTES ? style : "accurate") as AgentStyle;
   const p = PALETTES[st];
   const h = hash(id);
